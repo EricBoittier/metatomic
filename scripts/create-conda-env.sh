@@ -32,9 +32,9 @@ Environment '${ENV_NAME}' is ready.
 On GPU nodes, load your CUDA module first if needed, then activate the env.
 METATOMIC_CUDA_HOST_COMPILER is set automatically to the conda GCC 13 g++.
 
-Install metatomic-torch from a checkout:
+Install metatomic-torch from a checkout (editable installs are not supported):
 
-  pip install --no-deps --no-build-isolation -e python/metatomic_torch
+  pip install --no-deps --no-build-isolation --check-build-dependencies python/metatomic_torch
 
 Run tests (same as CI/tox):
 

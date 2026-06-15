@@ -10,8 +10,8 @@
 #   ./scripts/create-conda-env.sh
 #   conda activate metatomic-torch
 #
-# Build / test from a git checkout:
-#   pip install --no-deps --no-build-isolation -e python/metatomic_torch
+# Build / test from a git checkout (editable installs are not supported):
+#   pip install --no-deps --no-build-isolation --check-build-dependencies python/metatomic_torch
 #   tox -e torch-tests-cxx,torch-tests
 
 name: metatomic-torch
@@ -26,20 +26,4 @@ dependencies:
   - binutils_linux-64
   - pip
   - pip:
-      - setuptools>=77
-      - packaging>=26
-      - setuptools-scm
-      - tox>=4.39
-      - pytest
-      - pytest-cov
-      - coverage
-      - ruff
-      - numpy
-      - metatensor-torch>=0.9.0,<0.10
-      - metatensor-operations>=0.5.0,<0.6
-      - --extra-index-url
-      - https://download.pytorch.org/whl/cu126
-      - torch==2.12.*
-      - vesin>=0.5.6,<0.6
-      - vesin-torch>=0.5.6,<0.6
-      - ase
+      - -r file:conda/requirements-pip.txt
