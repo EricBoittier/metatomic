@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import threading
+import urllib.request
+from http.server import ThreadingHTTPServer
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,15 +17,18 @@ import numpy as np
 import pytest
 from ase.calculators.calculator import Calculator, all_changes
 
-SCRIPT = Path(__file__).resolve().parent / "metatomic-orca-external"
+EXAMPLE_DIR = Path(__file__).resolve().parent
+COMMON_MODULE = EXAMPLE_DIR / "orca_common.py"
+SERVER_MODULE = EXAMPLE_DIR / "metatomic-orca-server"
+CLIENT_MODULE = EXAMPLE_DIR / "metatomic-orca-client"
 
 
-def load_orca_module():
+def load_module(path: Path, name: str):
     mock_metatomic_ase = MagicMock()
     sys.modules.setdefault("metatomic_ase", mock_metatomic_ase)
 
-    loader = SourceFileLoader("metatomic_orca_external", str(SCRIPT))
-    spec = importlib.util.spec_from_loader("metatomic_orca_external", loader)
+    loader = SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -31,10 +38,21 @@ def load_orca_module():
 
 @pytest.fixture
 def orca():
-    module = load_orca_module()
+    module = load_module(COMMON_MODULE, "orca_common")
     module.clear_calculator_cache()
     yield module
     module.clear_calculator_cache()
+
+
+@pytest.fixture
+def orca_server(orca):
+    module = load_module(SERVER_MODULE, "metatomic_orca_server")
+    return module
+
+
+@pytest.fixture
+def orca_client():
+    return load_module(CLIENT_MODULE, "metatomic_orca_client")
 
 
 class FixedEnergyCalculator(Calculator):
@@ -50,6 +68,26 @@ class FixedEnergyCalculator(Calculator):
             "energy": self.energy_ev,
             "forces": self.forces_ev_angstrom.copy(),
         }
+
+
+def _write_water_job(tmp_path: Path) -> Path:
+    xyz_path = tmp_path / "water.xyz"
+    xyz_path.write_text(
+        "3\n"
+        "water\n"
+        "O 0.0 0.0 0.1173\n"
+        "H 0.0 0.7572 -0.4692\n"
+        "H 0.0 -0.7572 -0.4692\n"
+    )
+    extinp_path = tmp_path / "water_EXT.extinp.tmp"
+    extinp_path.write_text(
+        f"{xyz_path.name}\n"
+        "0\n"
+        "1\n"
+        "1\n"
+        "1\n"
+    )
+    return extinp_path
 
 
 def test_read_extinp_and_xyz(tmp_path, orca):
@@ -100,22 +138,7 @@ def test_forces_to_orca_gradient(orca):
 
 
 def test_run_orca_job_writes_engrad(tmp_path, orca, monkeypatch):
-    xyz_path = tmp_path / "water.xyz"
-    xyz_path.write_text(
-        "3\n"
-        "water\n"
-        "O 0.0 0.0 0.1173\n"
-        "H 0.0 0.7572 -0.4692\n"
-        "H 0.0 -0.7572 -0.4692\n"
-    )
-    extinp_path = tmp_path / "water_EXT.extinp.tmp"
-    extinp_path.write_text(
-        f"{xyz_path.name}\n"
-        "0\n"
-        "1\n"
-        "1\n"
-        "1\n"
-    )
+    extinp_path = _write_water_job(tmp_path)
 
     energy_ev = -27.2
     forces = np.zeros((3, 3))
@@ -142,3 +165,79 @@ def test_run_orca_job_writes_engrad(tmp_path, orca, monkeypatch):
     assert f"{expected_energy:.12e}" in content
     for value in expected_gradient:
         assert f"{value: .12e}" in content
+
+
+def test_server_handles_job(tmp_path, orca, orca_server, monkeypatch):
+    extinp_path = _write_water_job(tmp_path)
+    fake_model = tmp_path / "fake.pt"
+    fake_model.write_text("placeholder")
+    settings = orca.MetatomicOrcaSettings(model=fake_model)
+
+    energy_ev = -13.6
+    fake_calc = FixedEnergyCalculator(energy_ev, np.zeros((3, 3)))
+    monkeypatch.setattr(orca, "get_calculator", lambda _settings: fake_calc)
+
+    server = orca_server.MetatomicOrcaServer(default_settings=settings)
+    try:
+        result = server.handle(
+            [extinp_path.name],
+            str(tmp_path),
+        )
+        assert result["status"] == "Success"
+        assert (tmp_path / "water.engrad").is_file()
+    finally:
+        server.shutdown()
+
+
+def test_client_server_http_roundtrip(tmp_path, orca, orca_server, orca_client, monkeypatch):
+    extinp_path = _write_water_job(tmp_path)
+    fake_model = tmp_path / "fake.pt"
+    fake_model.write_text("placeholder")
+    settings = orca.MetatomicOrcaSettings(model=fake_model)
+
+    fake_calc = FixedEnergyCalculator(-10.0, np.zeros((3, 3)))
+    monkeypatch.setattr(orca, "get_calculator", lambda _settings: fake_calc)
+
+    server = orca_server.MetatomicOrcaServer(default_settings=settings)
+    handler = orca_server.create_handler(server)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    host, port = httpd.server_address
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        orca_client.send_to_server(
+            f"{host}:{port}",
+            [extinp_path.name],
+            working_directory=str(tmp_path),
+        )
+        assert (tmp_path / "water.engrad").is_file()
+    finally:
+        server.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2.0)
+
+
+def test_healthz_endpoint(tmp_path, orca, orca_server, monkeypatch):
+    fake_model = tmp_path / "fake.pt"
+    fake_model.write_text("placeholder")
+    settings = orca.MetatomicOrcaSettings(model=fake_model)
+    monkeypatch.setattr(orca, "get_calculator", lambda _settings: FixedEnergyCalculator(0.0, np.zeros((1, 3))))
+
+    server = orca_server.MetatomicOrcaServer(default_settings=settings)
+    handler = orca_server.create_handler(server)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    host, port = httpd.server_address
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        assert payload == {"status": "OK"}
+    finally:
+        server.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2.0)
