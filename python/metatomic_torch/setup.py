@@ -87,9 +87,7 @@ class cmake_ext(build_ext):
             "METATOMIC_CUDA_HOST_COMPILER", os.environ.get("CUDAHOSTCXX")
         )
         if cuda_host_compiler:
-            cmake_options.append(
-                f"-DCMAKE_CUDA_HOST_COMPILER={cuda_host_compiler}"
-            )
+            cmake_options.append(f"-DCMAKE_CUDA_HOST_COMPILER={cuda_host_compiler}")
 
         subprocess.run(
             ["cmake", source_dir, *cmake_options],
