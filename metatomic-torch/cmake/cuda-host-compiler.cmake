@@ -1,5 +1,5 @@
-# CUDA 12.x only supports GCC up to 13 as nvcc's host compiler. When the main C++
-# compiler is newer (common on HPC clusters), point nvcc at an older g++ instead.
+# CUDA 12.x only supports GCC up to 13 as nvcc's host compiler. On HPC clusters the
+# main CXX compiler may be older while `gcc` on PATH (used by nvcc by default) is GCC 14+.
 #
 # Include once before project() and once after project(), before find_package(Torch)
 # or find_package(metatensor_torch) enable CUDA.
@@ -35,6 +35,12 @@ function(_metatomic_try_cuda_host_compiler _compiler _out_var)
     endif()
 endfunction()
 
+function(_metatomic_apply_cuda_host_compiler _cuda_host _reason)
+    get_filename_component(_cuda_host "${_cuda_host}" REALPATH)
+    set(CMAKE_CUDA_HOST_COMPILER "${_cuda_host}" CACHE FILEPATH "CUDA host compiler" FORCE)
+    message(STATUS "${_reason}; using ${_cuda_host} as CMAKE_CUDA_HOST_COMPILER for nvcc")
+endfunction()
+
 function(_metatomic_find_cuda_host_compiler _out_var)
     set(_explicit "")
     if(DEFINED ENV{METATOMIC_CUDA_HOST_COMPILER} AND NOT "$ENV{METATOMIC_CUDA_HOST_COMPILER}" STREQUAL "")
@@ -57,6 +63,19 @@ function(_metatomic_find_cuda_host_compiler _out_var)
             set(${_out_var} "${_found}" PARENT_SCOPE)
             return()
         endif()
+    endif()
+
+    if(DEFINED ENV{CONDA_PREFIX})
+        foreach(_candidate IN ITEMS
+            "$ENV{CONDA_PREFIX}/bin/x86_64-conda-linux-gnu-g++"
+            "$ENV{CONDA_PREFIX}/bin/x86_64-conda-linux-gnu-gcc"
+        )
+            _metatomic_try_cuda_host_compiler("${_candidate}" _found)
+            if(_found)
+                set(${_out_var} "${_found}" PARENT_SCOPE)
+                return()
+            endif()
+        endforeach()
     endif()
 
     foreach(_name IN ITEMS g++-13 gcc-13 g++-12 gcc-12 g++-11 gcc-11)
@@ -91,48 +110,91 @@ function(_metatomic_find_cuda_host_compiler _out_var)
     endforeach()
 endfunction()
 
-function(_metatomic_set_cuda_host_compiler_if_needed _cxx_compiler _cxx_major)
-    if(NOT _cxx_major GREATER 13)
+function(_metatomic_compiler_needs_cuda_host_override _compiler _out_var)
+    set(${_out_var} FALSE PARENT_SCOPE)
+    if(NOT _compiler)
         return()
+    endif()
+    _metatomic_gcc_major_version("${_compiler}" _major)
+    if(_major GREATER 13)
+        set(${_out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(metatomic_configure_cuda_host_compiler)
+    if(DEFINED ENV{METATOMIC_CUDA_HOST_COMPILER} AND NOT "$ENV{METATOMIC_CUDA_HOST_COMPILER}" STREQUAL "")
+        _metatomic_try_cuda_host_compiler("$ENV{METATOMIC_CUDA_HOST_COMPILER}" _cuda_host)
+        if(_cuda_host)
+            _metatomic_apply_cuda_host_compiler("${_cuda_host}" "METATOMIC_CUDA_HOST_COMPILER is set")
+            return()
+        endif()
+        message(WARNING "METATOMIC_CUDA_HOST_COMPILER='$ENV{METATOMIC_CUDA_HOST_COMPILER}' is missing or uses GCC > 13")
+    endif()
+
+    if(DEFINED ENV{CUDAHOSTCXX} AND NOT "$ENV{CUDAHOSTCXX}" STREQUAL "")
+        _metatomic_try_cuda_host_compiler("$ENV{CUDAHOSTCXX}" _cuda_host)
+        if(_cuda_host)
+            _metatomic_apply_cuda_host_compiler("${_cuda_host}" "CUDAHOSTCXX is set")
+            return()
+        endif()
+        message(WARNING "CUDAHOSTCXX='$ENV{CUDAHOSTCXX}' is missing or uses GCC > 13")
     endif()
 
     if(CMAKE_CUDA_HOST_COMPILER)
         _metatomic_gcc_major_version("${CMAKE_CUDA_HOST_COMPILER}" _cuda_host_major)
         if(_cuda_host_major GREATER 0 AND _cuda_host_major LESS_EQUAL 13)
-            message(STATUS "Using CMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER} for nvcc (main CXX is GCC ${_cxx_major})")
             return()
         endif()
     endif()
 
+    set(_need_override FALSE)
+    set(_reason "")
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        string(REGEX MATCH "^([0-9]+)" _cxx_major "${CMAKE_CXX_COMPILER_VERSION}")
+        if(_cxx_major GREATER 13)
+            set(_need_override TRUE)
+            set(_reason "Main CXX compiler ${CMAKE_CXX_COMPILER} is GCC ${_cxx_major}")
+        endif()
+    elseif(DEFINED ENV{CXX} AND NOT "$ENV{CXX}" STREQUAL "")
+        _metatomic_compiler_needs_cuda_host_override("$ENV{CXX}" _needs)
+        if(_needs)
+            set(_need_override TRUE)
+            set(_reason "CXX environment variable points to $ENV{CXX}")
+        endif()
+    endif()
+
+    find_program(_metatomic_default_gcc gcc)
+    if(_metatomic_default_gcc)
+        _metatomic_compiler_needs_cuda_host_override("${_metatomic_default_gcc}" _needs)
+        if(_needs)
+            set(_need_override TRUE)
+            if(_reason STREQUAL "")
+                set(_reason "Default gcc on PATH (${_metatomic_default_gcc})")
+            else()
+                set(_reason "${_reason} and default gcc on PATH (${_metatomic_default_gcc})")
+            endif()
+        endif()
+    endif()
+
+    if(NOT _need_override)
+        return()
+    endif()
+
     _metatomic_find_cuda_host_compiler(_cuda_host)
     if(_cuda_host)
-        get_filename_component(_cuda_host "${_cuda_host}" REALPATH)
-        set(CMAKE_CUDA_HOST_COMPILER "${_cuda_host}" CACHE FILEPATH "CUDA host compiler" FORCE)
-        message(STATUS "Main CXX compiler ${_cxx_compiler} is GCC ${_cxx_major}; using ${_cuda_host} as CMAKE_CUDA_HOST_COMPILER for nvcc")
+        _metatomic_apply_cuda_host_compiler("${_cuda_host}" "${_reason}")
     else()
         message(FATAL_ERROR
-            "The main C++ compiler (${_cxx_compiler}, GCC ${_cxx_major}) cannot be used as nvcc's host compiler with CUDA 12.x.\n"
-            "Set METATOMIC_CUDA_HOST_COMPILER or CUDAHOSTCXX to a GCC 13 (or older) g++, "
-            "for example: export METATOMIC_CUDA_HOST_COMPILER=/usr/bin/g++-13")
+            "${_reason}, which cannot be used as nvcc's host compiler with CUDA 12.x.\n"
+            "Set METATOMIC_CUDA_HOST_COMPILER or CUDAHOSTCXX to a GCC 13 (or older) compiler, "
+            "for example the conda env g++: export METATOMIC_CUDA_HOST_COMPILER=\$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++")
     endif()
 endfunction()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    string(REGEX MATCH "^([0-9]+)" _metatomic_cxx_major_ "${CMAKE_CXX_COMPILER_VERSION}")
-    _metatomic_set_cuda_host_compiler_if_needed("${CMAKE_CXX_COMPILER}" "${_metatomic_cxx_major_}")
-elseif(NOT _metatomic_cuda_host_compiler_checked)
-    set(_metatomic_cuda_host_compiler_checked TRUE)
-
-    if(DEFINED ENV{CXX} AND NOT "$ENV{CXX}" STREQUAL "")
-        set(_metatomic_cxx_compiler "$ENV{CXX}")
-    elseif(CMAKE_CXX_COMPILER)
-        set(_metatomic_cxx_compiler "${CMAKE_CXX_COMPILER}")
-    else()
-        set(_metatomic_cxx_compiler "c++")
+if(NOT _metatomic_cuda_host_compiler_checked OR CMAKE_CXX_COMPILER_ID)
+    if(NOT _metatomic_cuda_host_compiler_checked)
+        set(_metatomic_cuda_host_compiler_checked TRUE)
     endif()
-
-    _metatomic_gcc_major_version("${_metatomic_cxx_compiler}" _metatomic_cxx_major_)
-    if(_metatomic_cxx_major_ GREATER 13)
-        _metatomic_set_cuda_host_compiler_if_needed("${_metatomic_cxx_compiler}" "${_metatomic_cxx_major_}")
-    endif()
+    metatomic_configure_cuda_host_compiler()
 endif()

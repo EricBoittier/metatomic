@@ -30,3 +30,4 @@ if [[ -f "${CONDA_PREFIX}/etc/conda/activate.d/metatomic-cuda-host.sh" ]]; then
 fi
 
 echo "Using ${CONDA_PREFIX}/bin/python ($("${CONDA_PREFIX}/bin/python" --version))"
+echo "METATOMIC_CUDA_HOST_COMPILER=${METATOMIC_CUDA_HOST_COMPILER:-unset}"
