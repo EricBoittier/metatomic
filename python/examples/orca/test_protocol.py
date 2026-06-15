@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import ase.units
 import numpy as np
@@ -15,11 +17,15 @@ SCRIPT = Path(__file__).resolve().parent / "metatomic-orca-external"
 
 
 def load_orca_module():
-    spec = importlib.util.spec_from_file_location("metatomic_orca_external", SCRIPT)
-    assert spec is not None and spec.loader is not None
+    mock_metatomic_ase = MagicMock()
+    sys.modules.setdefault("metatomic_ase", mock_metatomic_ase)
+
+    loader = SourceFileLoader("metatomic_orca_external", str(SCRIPT))
+    spec = importlib.util.spec_from_loader("metatomic_orca_external", loader)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
