@@ -1,0 +1,45 @@
+# Conda environment aligned with metatomic-torch development and tox.
+#
+# Matches tox defaults: Python 3.13, PyTorch 2.12 (CUDA), metatensor-torch 0.9.x.
+# Includes GCC 13 for nvcc's host compiler when the system default is GCC 14+.
+#
+# On GPU clusters, load CUDA before activating, e.g.:
+#   module load gcc/gcc-14.2.0-openmpi-5.0.5-cuda-12.6.1
+#
+# Create and configure:
+#   ./scripts/create-conda-env.sh
+#   conda activate metatomic-torch
+#
+# Build / test from a git checkout:
+#   pip install --no-deps --no-build-isolation -e python/metatomic_torch
+#   tox -e torch-tests-cxx,torch-tests
+
+name: metatomic-torch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - cmake>=3.22
+  - ninja
+  - gcc_linux-64=13
+  - gxx_linux-64=13
+  - binutils_linux-64
+  - pip
+  - pip:
+      - setuptools>=77
+      - packaging>=26
+      - setuptools-scm
+      - tox>=4.39
+      - pytest
+      - pytest-cov
+      - coverage
+      - ruff
+      - numpy
+      - metatensor-torch>=0.9.0,<0.10
+      - metatensor-operations>=0.5.0,<0.6
+      - --extra-index-url
+      - https://download.pytorch.org/whl/cu126
+      - torch==2.12.*
+      - vesin>=0.5.6,<0.6
+      - vesin-torch>=0.5.6,<0.6
+      - ase
