@@ -33,6 +33,8 @@ project(METATOMIC_TORCH
 )
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
 
+include(cmake/cuda-host-compiler.cmake)
+
 option(METATOMIC_TORCH_TESTS "Build metatomic-torch C++ tests" OFF)
 include(GNUInstallDirs)
 

@@ -4,6 +4,8 @@ message(STATUS "Running with CMake version ${CMAKE_VERSION}")
 
 project(metatomic-torch-test-cmake-project CXX)
 
+include(../../cmake/cuda-host-compiler.cmake)
+
 option(USE_CMAKE_SUBDIRECTORY OFF)
 
 if (USE_CMAKE_SUBDIRECTORY)
