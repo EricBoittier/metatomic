@@ -31,3 +31,4 @@ fi
 
 echo "Using ${CONDA_PREFIX}/bin/python ($("${CONDA_PREFIX}/bin/python" --version))"
 echo "METATOMIC_CUDA_HOST_COMPILER=${METATOMIC_CUDA_HOST_COMPILER:-unset}"
+echo "CUDAHOSTCXX=${CUDAHOSTCXX:-unset}"
