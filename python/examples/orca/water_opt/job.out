@@ -1,0 +1,874 @@
+
+                                 *****************
+                                 * O   R   C   A *
+                                 *****************
+
+                                            #,                                       
+                                            ###                                      
+                                            ####                                     
+                                            #####                                    
+                                            ######                                   
+                                           ########,                                 
+                                     ,,################,,,,,                         
+                               ,,#################################,,                 
+                          ,,##########################################,,             
+                       ,#########################################, ''#####,          
+                    ,#############################################,,   '####,        
+                  ,##################################################,,,,####,       
+                ,###########''''           ''''###############################       
+              ,#####''   ,,,,##########,,,,          '''####'''          '####       
+            ,##' ,,,,###########################,,,                        '##       
+           ' ,,###''''                  '''############,,,                           
+         ,,##''                                '''############,,,,        ,,,,,,###''
+      ,#''                                            '''#######################'''  
+     '                                                          ''''####''''         
+             ,#######,   #######,   ,#######,      ##                                
+            ,#'     '#,  ##    ##  ,#'     '#,    #''#        ,####,   ,####,        
+            ##       ##  ##   ,#'  ##            #'  '#       #'       #'  '#        
+            ##       ##  #######   ##           ,######,      #####,   #    #        
+            '#,     ,#'  ##    ##  '#,     ,#' ,#      #,     #,   #   #,  ,#        
+             '#######'   ##     ##  '#######'  #'      '#     '####' # '####'        
+
+
+
+                #########################################################
+                #                        -***-                          #
+                #          Department of theory and spectroscopy        #
+                #                                                       #
+                #                      Frank Neese                      #
+                #                                                       #
+                #     Directorship, Architecture, Infrastructure        #
+                #                    SHARK, DRIVERS                     #
+                #        Core code/Algorithms in most modules           #
+                #                                                       #
+                #        Max Planck Institute fuer Kohlenforschung      #
+                #                Kaiser Wilhelm Platz 1                 #
+                #                 D-45470 Muelheim/Ruhr                 #
+                #                      Germany                          #
+                #                                                       #
+                #                  All rights reserved                  #
+                #                        -***-                          #
+                #########################################################
+
+
+                         Program Version 6.0.1  -  RELEASE   -
+
+
+ With contributions from (in alphabetic order):
+[Max-Planck-Institut fuer Kohlenforschung]                               
+  Daniel Aravena         : Magnetic Suceptibility                        
+  Michael Atanasov       : Ab Initio Ligand Field Theory (pilot matlab implementation)
+  Alexander A. Auer      : GIAO ZORA, VPT2 properties, NMR spectrum      
+  Ute Becker             : All parallelization in ORCA, NUMFREQ, NUMCALC 
+  Giovanni Bistoni       : ED, misc. LED, open-shell LED, HFLD           
+  Martin Brehm           : Molecular dynamics                            
+  Dmytro Bykov           : pre 5.0 version of the SCF Hessian            
+  Marcos Casanova-Páez   : Triplet and SCS-CIS(D). UHF-(DLPNO)-IP/EA/STEOM-CCSD. UHF-CVS-IP/STEOM-CCSD   
+  Vijay G. Chilkuri      : MRCI spin determinant printing, contributions to CSF-ICE 
+  Pauline Colinet        : FMM embedding                                 
+  Dipayan Datta          : RHF DLPNO-CCSD density                        
+  Achintya Kumar Dutta   : EOM-CC, STEOM-CC                              
+  Nicolas Foglia         : Exact transition moments, OPA infrastructure, MCD improvements    
+  Dmitry Ganyushin       : Spin-Orbit,Spin-Spin,Magnetic field MRCI      
+  Miquel Garcia-Rates    : C-PCM and meta-GGA Hessian, CCSD/C-PCM, Gaussian charge scheme 
+  Tiago L. C. Gouveia    : GS-ROHF, GS-ROCIS                             
+  Yang Guo               : DLPNO-NEVPT2, F12-NEVPT2, CIM, IAO-localization        
+  Andreas Hansen         : Spin unrestricted coupled pair/coupled cluster methods 
+  Ingolf Harden          : AUTO-CI MPn and infrastructure                
+  Benjamin Helmich-Paris : MC-RPA, TRAH-(SCF,CASSCF), AVAS, COSX integrals, SCF dyn. polar. 
+  Lee Huntington         : MR-EOM, pCC                                   
+  Robert Izsak           : Overlap fitted RIJCOSX, COSX-SCS-MP3, EOM     
+  Riya Kayal             : Wick's Theorem for AUTO-CI, AUTO-CI UHF-CCSDT 
+  Emily Kempfer          : AUTO-CI, RHF CISDT and CCSDT                  
+  Christian Kollmar      : KDIIS, OOCD, Brueckner-CCSD(T), CCSD density, CASPT2, CASPT2-K, improved NEVPT2 
+  Axel Koslowski         : Symmetry handling                             
+  Simone Kossmann        : meta-GGA functionals, TD-DFT gradient, OOMP2, (MP2 Hessian; deprecated post 5.0) 
+  Lucas Lang             : DCDCAS                                        
+  Marvin Lechner         : AUTO-CI (C++ implementation), FIC-MRCC        
+  Spencer Leger          : CASSCF response                               
+  Dagmar Lenk            : GEPOL surface, SMD, ORCA-2-JSON               
+  Dimitrios Liakos       : Extrapolation schemes; Compound Job, initial MDCI parallelization 
+  Dimitrios Manganas     : Further ROCIS development; embedding schemes. LFT, Crystal Embedding 
+  Dimitrios Pantazis     : SARC Basis sets                               
+  Anastasios Papadopoulos: AUTO-CI, single reference methods and gradients 
+  Taras Petrenko         : pre 6.0 DFT Hessian and TD-DFT gradient, (ASA, deprecated), ECA, 1-Electron XAS/XES, NRVS 
+  Peter Pinski           : DLPNO-MP2, DLPNO-MP2 Gradient                 
+  Christoph Reimann      : Effective Core Potentials                     
+  Marius Retegan         : Local ZFS, SOC                                
+  Christoph Riplinger    : Optimizer, TS searches, QM/MM, DLPNO-CCSD(T), (RO)-DLPNO pert. Triples 
+  Michael Roemelt        : Original ROCIS implementation                 
+  Masaaki Saitow         : Open-shell DLPNO-CCSD energy and density      
+  Barbara Sandhoefer     : DKH picture change effects                    
+  Kantharuban Sivalingam : CASSCF convergence/infrastructure, NEVPT2 and variants, FIC-MRCI 
+  Bernardo de Souza      : ESD, SOC TD-DFT                               
+  Georgi L. Stoychev     : AutoAux, RI-MP2 NMR, DLPNO-MP2 response, X2C  
+  Van Anh Tran           : RI-MP2 g-tensors                              
+  Willem Van den Heuvel  : Paramagnetic NMR                              
+  Zikuan Wang            : NOTCH, Electric field optimization            
+  Frank Wennmohs         : Technical directorship and infrastructure     
+  Hang Xu                : AUTO-CI-Response properties                   
+                                                                         
+[FACCTs GmbH]                                                            
+  Markus Bursch, Miquel Garcia-Rates, Christoph Riplinger, Bernardo de Souza, Georgi L. Stoychev 
+                                                                 
+  APM, Basis sets (HGBS, AHGBS, def-TZVP (Ac-Lr), def2-XVPD (La-Lu)), CI-OPT, improved COSX, DLPNO-Multilevel,           
+  DOCKER, DRACO, updates on ESD, GOAT, IRC, LR-CPCM, MBIS, meta-GGA TD-DFT gradient, ML-optimized integration grids, 
+  MM, NACMEs, nearIR, NEB, NEB-TS, NL-DFT gradient (VV10), 2- and 3-layer-ONIOM, interface openCOSMO-RS, QMMM,   
+  Crystal-QMMM, SF, symmetry and pop. for TD-DFT, r2SCAN hybrids, SOLVATOR                                   
+                                                                         
+[Other institutions]                                                     
+  V. Asgeirsson          : NEB                                           
+  Christoph Bannwarth    : sTDA-DFT, sTD-DFT, PBEh-3c, B97-3c, D3        
+  Sebastian Ehlert       : rSCAN, r2SCAN, r2SCAN-3c, D4, dhf basis sets  
+  Marvin Friede          : D4 for Fr, Ra, Ac-Lr                          
+  Lars Goerigk           : TD-DFT with DH, B97 family of functionals     
+  Stefan Grimme          : VdW corrections, initial TS optimization, DFT functionals, gCP, sTDA/sTD-DF 
+  Waldemar Hujo          : DFT-NL                                        
+  H. Jonsson             : NEB                                           
+  Holger Kruse           : gCP                                           
+  Marcel Mueller         : wB97X-3c, vDZP basis set                      
+  Hagen Neugebauer       : wr2SCAN                                       
+  Tobias Risthaus        : range-separated hybrid DFT                    
+  Lukas Wittmann         : regularized MP2, r2SCAN double-hybrids, wr2SCAN        
+                                                                         
+We gratefully acknowledge several colleagues who have allowed us to      
+interface, adapt or use parts of their codes:                            
+  Ed Valeev, F. Pavosevic, A. Kumar             : LibInt (2-el integral package), F12 methods 
+  Garnet Chan, S. Sharma, J. Yang, R. Olivares  : DMRG                   
+  Ulf Ekstrom                                   : XCFun DFT Library      
+  Mihaly Kallay                                 : mrcc  (arbitrary order and MRCC methods)
+  Frank Weinhold                                : gennbo (NPA and NBO analysis)           
+  Simon Mueller                                 : openCOSMO-RS                            
+  Christopher J. Cramer and Donald G. Truhlar   : smd solvation model                     
+  S Lehtola, MJT Oliveira, MAL Marques          : LibXC Library                           
+  Liviu Ungur et al                             : ANISO software                          
+
+
+ Your calculation uses the libint2 library for the computation of 2-el integrals
+ For citations please refer to: http://libint.valeyev.net
+
+ Your ORCA version has been built with support for libXC version: 6.2.2
+ For citations please refer to: https://libxc.gitlab.io
+
+ This ORCA versions uses:
+   CBLAS   interface :  Fast vector & matrix operations
+   LAPACKE interface :  Fast linear algebra routines
+   SCALAPACK package :  Parallel linear algebra routines
+   Shared memory     :  Shared parallel matrices
+   BLAS/LAPACK       :  OpenBLAS 0.3.27  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Cooperlake SINGLE_THREADED
+        Core in use  :  Cooperlake
+   Copyright (c) 2011-2014, The OpenBLAS Project
+
+
+NOTE: MaxCore=2000 MB was set to SCF,MP2,MDCI,CIPSI,MRCI and CIS
+      => If you want to overwrite this, your respective input block should be placed after the MaxCore statement
+
+
+***************************************
+The coordinates will be read from file: water.xyz
+***************************************
+
+
+================================================================================
+
+================================================================================
+                                        WARNINGS
+                       Please study these warnings very carefully!
+================================================================================
+
+
+WARNING: Geometry Optimization
+  ===> : Switching off AutoStart
+         For restart on a previous wavefunction, please use MOREAD
+
+Using external energy/gradient program given in input:
+  "/mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client"
+
+
+WARNING: four-center integrals in TRAH must be done with SHARK!
+  ===> : Turning Shark on
+
+
+================================================================================
+                                       INPUT FILE
+================================================================================
+NAME = water_opt.inp
+|  1> ! ExtOpt Opt
+|  2> %maxcore 2000
+|  3> 
+|  4> %method
+|  5>   ProgExt "/mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client"
+|  6>   Ext_Params "-b 127.0.0.1:8888"
+|  7> end
+|  8> 
+|  9> * xyzfile 0 1 water.xyz
+| 10> 
+| 11>                          ****END OF INPUT****
+================================================================================
+
+                       *****************************
+                       * Geometry Optimization Run *
+                       *****************************
+
+Geometry optimization settings:
+Update method            Update   .... BFGS
+Choice of coordinates    CoordSys .... (2022) Redundant Internals
+Initial Hessian          InHess   .... Almloef's Model
+Max. no of cycles        MaxIter  .... 50
+
+Convergence Tolerances:
+Energy Change            TolE     ....  5.0000e-06 Eh
+Max. Gradient            TolMAXG  ....  3.0000e-04 Eh/bohr
+RMS Gradient             TolRMSG  ....  1.0000e-04 Eh/bohr
+Max. Displacement        TolMAXD  ....  4.0000e-03 bohr
+RMS Displacement         TolRMSD  ....  2.0000e-03 bohr
+Strict Convergence                .... False
+
+------------------------------------------------------------------------------
+                        ORCA OPTIMIZATION COORDINATE SETUP
+------------------------------------------------------------------------------
+
+The optimization will be done in redundant internal coordinates (2022)
+Making redundant internal coordinates   ...  (2022 redundants) done
+Evaluating the initial hessian          ...  (Almloef) done
+Evaluating the coordinates              ...  done
+Calculating the B-matrix                .... done
+Calculating the G-matrix                .... done
+Diagonalizing the G-matrix              .... done
+The first mode is                       ....    0
+The number of degrees of freedom        ....    3
+
+    -----------------------------------------------------------------
+                    Redundant Internal Coordinates
+
+
+    -----------------------------------------------------------------
+         Definition                    Initial Value    Approx d2E/dq
+    -----------------------------------------------------------------
+      1. B(H   1,O   0)                  0.9578         0.524222   
+      2. B(H   2,O   0)                  0.9578         0.524222   
+      3. A(H   1,O   0,H   2)          104.4798         0.322697   
+    -----------------------------------------------------------------
+
+Number of atoms                         .... 3
+Number of degrees of freedom            .... 3
+
+
+         *************************************************************
+         *                GEOMETRY OPTIMIZATION CYCLE   1            *
+         *************************************************************
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O      0.000000    0.000000    0.117300
+  H      0.000000    0.757200   -0.469200
+  H      0.000000   -0.757200   -0.469200
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 O     8.0000    0    15.999    0.000000    0.000000    0.221665
+   1 H     1.0000    0     1.008    0.000000    1.430901   -0.886660
+   2 H     1.0000    0     1.008    0.000000   -1.430901   -0.886660
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     0.957775594803     0.00000000     0.00000000
+ H      1   2   0     0.957775594803   104.47983882     0.00000000
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     1.809933571931     0.00000000     0.00000000
+ H      1   2   0     1.809933571931   104.47983882     0.00000000
+
+Calling /mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client water_opt_EXT.extinp.tmp -b 127.0.0.1:8888  ... 
+
+
+External program completed successfully in 0.104 sec
+
+-------------------------------------------------   --------------------
+FINAL SINGLE POINT ENERGY (From external program)        -0.528219360813
+-------------------------------------------------   --------------------
+
+
+------------------
+CARTESIAN GRADIENT
+------------------
+
+   1   O   :   -0.000150624    0.000104594   -0.016876306
+   2   H   :    0.000083110   -0.011823812    0.008377713
+   3   H   :    0.000067514    0.011719219    0.008498593
+
+Difference to translation invariance:
+           :    0.0000000000   -0.0000000000    0.0000000006
+
+Difference to rotation invariance:
+           :   -0.0002888911   -0.0001669397   -0.0000223168
+
+Norm of the Cartesian gradient     ...    0.0265407156
+RMS gradient                       ...    0.0088469052
+MAX gradient                       ...    0.0168763060
+------------------------------------------------------------------------------
+                         ORCA GEOMETRY RELAXATION STEP
+------------------------------------------------------------------------------
+
+Reading the OPT-File                    .... done
+Getting information on internals        .... done
+Copying old internal coords+grads       .... done
+Making the new internal coordinates     .... (2022 redundants) done
+Validating the new internal coordinates .... (2022 redundants) done
+Calculating the B-matrix                .... done
+Calculating the G,G- and P matrices     .... done
+Transforming gradient to internals      .... done
+Projecting the internal gradient        .... done
+Number of atoms                         ....   3
+Number of internal coordinates          ....   3
+Current Energy                          ....    -0.528219361 Eh
+Current gradient norm                   ....     0.026540716 Eh/bohr
+Maximum allowed component of the step   ....  0.300
+Current trust radius                    ....  0.300
+Evaluating the initial hessian          ....  (Almloef) done
+Projecting the Hessian                  .... done
+Forming the augmented Hessian           .... done
+Diagonalizing the augmented Hessian     .... done
+Last element of RFO vector              ....  0.999236393
+Lowest eigenvalues of augmented Hessian:
+ -0.000800921  0.322699596  0.524222476
+Length of the computed step             ....  0.039101989
+The final length of the internal step   ....  0.039101989
+Converting the step to Cartesian space:
+ Initial RMS(Int)=    0.0225755442
+Transforming coordinates:
+ Iter   0:  RMS(Cart)=    0.0117634910 RMS(Int)=    0.0225751970
+done
+Storing new coordinates                 .... done
+
+                                .--------------------.
+          ----------------------|Geometry convergence|-------------------------
+          Item                value                   Tolerance       Converged
+          ---------------------------------------------------------------------
+          RMS gradient        0.0118309389            0.0001000000      NO
+          MAX gradient        0.0145121800            0.0003000000      NO
+          RMS step            0.0225755442            0.0020000000      NO
+          MAX step            0.0276410157            0.0040000000      NO
+          ........................................................
+          Max(Bonds)      0.0146      Max(Angles)    0.17
+          Max(Dihed)        0.00      Max(Improp)    0.00
+          ---------------------------------------------------------------------
+
+The optimization has not yet converged - more geometry cycles are needed
+
+
+    ---------------------------------------------------------------------------
+                         Redundant Internal Coordinates
+                            (Angstroem and degrees)
+
+        Definition                    Value    dE/dq     Step     New-Value
+    ----------------------------------------------------------------------------
+     1. B(H   1,O   0)                0.9578 -0.014512  0.0146    0.9724   
+     2. B(H   2,O   0)                0.9578 -0.014435  0.0145    0.9723   
+     3. A(H   1,O   0,H   2)          104.48 -0.000972    0.17    104.65   
+    ----------------------------------------------------------------------------
+
+Geometry step timings:
+Preparation and reading OPT file:      0.001 s (16.832 %)
+Internal coordinates            :      0.000 s ( 0.165 %)
+B/P matrices and projection     :      0.000 s ( 0.898 %)
+Hessian update/contruction      :      0.002 s (44.066 %)
+Making the step                 :      0.000 s ( 0.473 %)
+Converting the step to Cartesian:      0.000 s ( 0.378 %)
+Storing new data                :      0.000 s ( 9.764 %)
+Checking convergence            :      0.000 s ( 0.024 %)
+Final printing                  :      0.001 s (27.352 %)
+Total time                      :      0.004 s
+
+Time for energy+gradient        :      0.120 s
+Time for complete geometry iter :      0.243 s
+
+         *************************************************************
+         *                GEOMETRY OPTIMIZATION CYCLE   2            *
+         *************************************************************
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O      0.000000   -0.000027    0.122485
+  H      0.000000    0.769641   -0.471803
+  H      0.000000   -0.769613   -0.471782
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 O     8.0000    0    15.999    0.000000   -0.000052    0.231462
+   1 H     1.0000    0     1.008    0.000000    1.454410   -0.891578
+   2 H     1.0000    0     1.008    0.000000   -1.454359   -0.891538
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     0.972402590358     0.00000000     0.00000000
+ H      1   2   0     0.972324625034   104.65208145     0.00000000
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     1.837574587692     0.00000000     0.00000000
+ H      1   2   0     1.837427254582   104.65208145     0.00000000
+
+Calling /mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client water_opt_EXT.extinp.tmp -b 127.0.0.1:8888  > water_opt.lastext ...  done
+
+External program completed successfully in 0.053 sec
+------------------------------------------------------------------------------
+                         ORCA GEOMETRY RELAXATION STEP
+------------------------------------------------------------------------------
+
+Reading the OPT-File                    .... done
+Getting information on internals        .... done
+Copying old internal coords+grads       .... done
+Making the new internal coordinates     .... (2022 redundants) done
+Validating the new internal coordinates .... (2022 redundants) done
+Calculating the B-matrix                .... done
+Calculating the G,G- and P matrices     .... done
+Transforming gradient to internals      .... done
+Projecting the internal gradient        .... done
+Number of atoms                         ....   3
+Number of internal coordinates          ....   3
+Current Energy                          ....    -0.528599549 Eh
+Current gradient norm                   ....     0.000987945 Eh/bohr
+Maximum allowed component of the step   ....  0.300
+Current trust radius                    ....  0.300
+Updating the Hessian (BFGS)             .... done
+Forming the augmented Hessian           .... done
+Diagonalizing the augmented Hessian     .... done
+Last element of RFO vector              ....  0.999995785
+Lowest eigenvalues of augmented Hessian:
+ -0.000003082  0.323312935  0.524153725
+Length of the computed step             ....  0.002903291
+The final length of the internal step   ....  0.002903291
+Converting the step to Cartesian space:
+ Initial RMS(Int)=    0.0016762157
+Transforming coordinates:
+ Iter   0:  RMS(Cart)=    0.0010708028 RMS(Int)=    0.0016763031
+done
+Storing new coordinates                 .... done
+The predicted energy change is          ....    -0.000001541
+Previously predicted energy change      ....    -0.000401073
+Actually observed energy change         ....    -0.000380189
+Ratio of predicted to observed change   ....     0.947928646
+New trust radius                        ....     0.450000000
+
+                                .--------------------.
+          ----------------------|Geometry convergence|-------------------------
+          Item                value                   Tolerance       Converged
+          ---------------------------------------------------------------------
+          Energy change      -0.0003801886            0.0000050000      NO
+          RMS gradient        0.0006295713            0.0001000000      NO
+          MAX gradient        0.0009118877            0.0003000000      NO
+          RMS step            0.0016762157            0.0020000000      YES
+          MAX step            0.0027282392            0.0040000000      YES
+          ........................................................
+          Max(Bonds)      0.0004      Max(Angles)    0.16
+          Max(Dihed)        0.00      Max(Improp)    0.00
+          ---------------------------------------------------------------------
+
+The optimization has not yet converged - more geometry cycles are needed
+
+
+    ---------------------------------------------------------------------------
+                         Redundant Internal Coordinates
+                            (Angstroem and degrees)
+
+        Definition                    Value    dE/dq     Step     New-Value
+    ----------------------------------------------------------------------------
+     1. B(H   1,O   0)                0.9724  0.000393 -0.0003    0.9721   
+     2. B(H   2,O   0)                0.9723  0.000451 -0.0004    0.9719   
+     3. A(H   1,O   0,H   2)          104.65  0.000912   -0.16    104.50   
+    ----------------------------------------------------------------------------
+
+Geometry step timings:
+Preparation and reading OPT file:      0.000 s (11.675 %)
+Internal coordinates            :      0.000 s ( 0.144 %)
+B/P matrices and projection     :      0.000 s ( 0.957 %)
+Hessian update/contruction      :      0.002 s (57.440 %)
+Making the step                 :      0.000 s ( 0.407 %)
+Converting the step to Cartesian:      0.000 s ( 0.167 %)
+Storing new data                :      0.000 s ( 9.187 %)
+Checking convergence            :      0.000 s ( 0.072 %)
+Final printing                  :      0.001 s (19.928 %)
+Total time                      :      0.004 s
+
+Time for energy+gradient        :      0.066 s
+Time for complete geometry iter :      0.085 s
+
+         *************************************************************
+         *                GEOMETRY OPTIMIZATION CYCLE   3            *
+         *************************************************************
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O      0.000000   -0.000048    0.123033
+  H      0.000000    0.768547   -0.472085
+  H      0.000000   -0.768499   -0.472048
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 O     8.0000    0    15.999    0.000000   -0.000090    0.232499
+   1 H     1.0000    0     1.008    0.000000    1.452343   -0.892111
+   2 H     1.0000    0     1.008    0.000000   -1.452253   -0.892042
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     0.972060774722     0.00000000     0.00000000
+ H      1   2   0     0.971925605437   104.49576486     0.00000000
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     1.836928649751     0.00000000     0.00000000
+ H      1   2   0     1.836673216821   104.49576486     0.00000000
+
+Calling /mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client water_opt_EXT.extinp.tmp -b 127.0.0.1:8888  > water_opt.lastext ...  done
+
+External program completed successfully in 0.052 sec
+------------------------------------------------------------------------------
+                         ORCA GEOMETRY RELAXATION STEP
+------------------------------------------------------------------------------
+
+Reading the OPT-File                    .... done
+Getting information on internals        .... done
+Copying old internal coords+grads       .... done
+Making the new internal coordinates     .... (2022 redundants) done
+Validating the new internal coordinates .... (2022 redundants) done
+Calculating the B-matrix                .... done
+Calculating the G,G- and P matrices     .... done
+Transforming gradient to internals      .... done
+Projecting the internal gradient        .... done
+Number of atoms                         ....   3
+Number of internal coordinates          ....   3
+Current Energy                          ....    -0.528601722 Eh
+Current gradient norm                   ....     0.000569853 Eh/bohr
+Maximum allowed component of the step   ....  0.300
+Current trust radius                    ....  0.450
+Updating the Hessian (BFGS)             .... done
+Forming the augmented Hessian           .... done
+Diagonalizing the augmented Hessian     .... done
+Last element of RFO vector              ....  0.999996502
+Lowest eigenvalues of augmented Hessian:
+ -0.000001193  0.170481578  0.524150767
+Length of the computed step             ....  0.002644827
+The final length of the internal step   ....  0.002644827
+Converting the step to Cartesian space:
+ Initial RMS(Int)=    0.0015269915
+Transforming coordinates:
+ Iter   0:  RMS(Cart)=    0.0008761848 RMS(Int)=    0.0015269923
+done
+Storing new coordinates                 .... done
+The predicted energy change is          ....    -0.000000596
+Previously predicted energy change      ....    -0.000001541
+Actually observed energy change         ....    -0.000002173
+Ratio of predicted to observed change   ....     1.410271539
+New trust radius                        ....     0.450000000
+
+                                .--------------------.
+          ----------------------|Geometry convergence|-------------------------
+          Item                value                   Tolerance       Converged
+          ---------------------------------------------------------------------
+          Energy change      -0.0000021729            0.0000050000      YES
+          RMS gradient        0.0002603611            0.0001000000      NO
+          MAX gradient        0.0004509452            0.0003000000      NO
+          RMS step            0.0015269915            0.0020000000      YES
+          MAX step            0.0026447764            0.0040000000      YES
+          ........................................................
+          Max(Bonds)      0.0000      Max(Angles)    0.15
+          Max(Dihed)        0.00      Max(Improp)    0.00
+          ---------------------------------------------------------------------
+
+The optimization has not yet converged - more geometry cycles are needed
+
+
+    ---------------------------------------------------------------------------
+                         Redundant Internal Coordinates
+                            (Angstroem and degrees)
+
+        Definition                    Value    dE/dq     Step     New-Value
+    ----------------------------------------------------------------------------
+     1. B(H   1,O   0)                0.9721 -0.000003 -0.0000    0.9721   
+     2. B(H   2,O   0)                0.9719 -0.000002 -0.0000    0.9719   
+     3. A(H   1,O   0,H   2)          104.50  0.000451   -0.15    104.34   
+    ----------------------------------------------------------------------------
+
+Geometry step timings:
+Preparation and reading OPT file:      0.001 s (13.765 %)
+Internal coordinates            :      0.000 s ( 0.118 %)
+B/P matrices and projection     :      0.000 s ( 0.918 %)
+Hessian update/contruction      :      0.002 s (47.200 %)
+Making the step                 :      0.000 s ( 0.376 %)
+Converting the step to Cartesian:      0.000 s ( 0.165 %)
+Storing new data                :      0.000 s ( 9.012 %)
+Checking convergence            :      0.000 s ( 0.094 %)
+Final printing                  :      0.001 s (28.329 %)
+Total time                      :      0.004 s
+
+Time for energy+gradient        :      0.065 s
+Time for complete geometry iter :      0.084 s
+
+         *************************************************************
+         *                GEOMETRY OPTIMIZATION CYCLE   4            *
+         *************************************************************
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O      0.000000   -0.000050    0.123708
+  H      0.000000    0.767757   -0.472424
+  H      0.000000   -0.767706   -0.472385
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 O     8.0000    0    15.999    0.000000   -0.000095    0.233775
+   1 H     1.0000    0     1.008    0.000000    1.450850   -0.892751
+   2 H     1.0000    0     1.008    0.000000   -1.450755   -0.892678
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     0.972060241048     0.00000000     0.00000000
+ H      1   2   0     0.971916967757   104.34423034     0.00000000
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     1.836927641254     0.00000000     0.00000000
+ H      1   2   0     1.836656893971   104.34423034     0.00000000
+
+Calling /mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client water_opt_EXT.extinp.tmp -b 127.0.0.1:8888  > water_opt.lastext ...  done
+
+External program completed successfully in 0.053 sec
+------------------------------------------------------------------------------
+                         ORCA GEOMETRY RELAXATION STEP
+------------------------------------------------------------------------------
+
+Reading the OPT-File                    .... done
+Getting information on internals        .... done
+Copying old internal coords+grads       .... done
+Making the new internal coordinates     .... (2022 redundants) done
+Validating the new internal coordinates .... (2022 redundants) done
+Calculating the B-matrix                .... done
+Calculating the G,G- and P matrices     .... done
+Transforming gradient to internals      .... done
+Projecting the internal gradient        .... done
+Number of atoms                         ....   3
+Number of internal coordinates          ....   3
+Current Energy                          ....    -0.528602353 Eh
+Current gradient norm                   ....     0.000276874 Eh/bohr
+Maximum allowed component of the step   ....  0.300
+Current trust radius                    ....  0.450
+Updating the Hessian (BFGS)             .... done
+Forming the augmented Hessian           .... done
+Diagonalizing the augmented Hessian     .... done
+Last element of RFO vector              ....  0.999999949
+Lowest eigenvalues of augmented Hessian:
+ -0.000000028  0.154331150  0.524158380
+Length of the computed step             ....  0.000320297
+The final length of the internal step   ....  0.000320297
+Converting the step to Cartesian space:
+ Initial RMS(Int)=    0.0001849234
+Transforming coordinates:
+ Iter   0:  RMS(Cart)=    0.0000774779 RMS(Int)=    0.0001849221
+done
+Storing new coordinates                 .... done
+The predicted energy change is          ....    -0.000000014
+Previously predicted energy change      ....    -0.000000596
+Actually observed energy change         ....    -0.000000631
+Ratio of predicted to observed change   ....     1.057912663
+New trust radius                        ....     0.675000000
+
+                                .--------------------.
+          ----------------------|Geometry convergence|-------------------------
+          Item                value                   Tolerance       Converged
+          ---------------------------------------------------------------------
+          Energy change      -0.0000006308            0.0000050000      YES
+          RMS gradient        0.0000623322            0.0001000000      YES
+          MAX gradient        0.0000754708            0.0003000000      YES
+          RMS step            0.0001849234            0.0020000000      YES
+          MAX step            0.0002668173            0.0040000000      YES
+          ........................................................
+          Max(Bonds)      0.0001      Max(Angles)    0.02
+          Max(Dihed)        0.00      Max(Improp)    0.00
+          ---------------------------------------------------------------------
+
+                    ***********************HURRAY********************
+                    ***        THE OPTIMIZATION HAS CONVERGED     ***
+                    *************************************************
+
+
+    ---------------------------------------------------------------------------
+                         Redundant Internal Coordinates
+
+                          --- Optimized Parameters ---  
+                            (Angstroem and degrees)
+
+        Definition                    OldVal   dE/dq     Step     FinalVal
+    ----------------------------------------------------------------------------
+     1. B(H   1,O   0)                0.9721 -0.000068  0.0001    0.9721   
+     2. B(H   2,O   0)                0.9719 -0.000075  0.0001    0.9720   
+     3. A(H   1,O   0,H   2)          104.34  0.000036   -0.02    104.33   
+    ----------------------------------------------------------------------------
+
+Geometry step timings:
+Preparation and reading OPT file:      0.001 s (14.109 %)
+Internal coordinates            :      0.000 s ( 0.119 %)
+B/P matrices and projection     :      0.000 s ( 0.880 %)
+Hessian update/contruction      :      0.002 s (52.296 %)
+Making the step                 :      0.000 s ( 0.381 %)
+Converting the step to Cartesian:      0.000 s ( 0.167 %)
+Storing new data                :      0.000 s ( 8.446 %)
+Checking convergence            :      0.000 s ( 0.071 %)
+Final printing                  :      0.001 s (23.507 %)
+Total time                      :      0.004 s
+                 *******************************************************
+                 *** FINAL ENERGY EVALUATION AT THE STATIONARY POINT ***
+                 ***               (AFTER    4 CYCLES)               ***
+                 *******************************************************
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O      0.000000   -0.000049    0.123804
+  H      0.000000    0.767729   -0.472470
+  H      0.000000   -0.767680   -0.472433
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 O     8.0000    0    15.999    0.000000   -0.000092    0.233955
+   1 H     1.0000    0     1.008    0.000000    1.450797   -0.892840
+   2 H     1.0000    0     1.008    0.000000   -1.450705   -0.892769
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     0.972123807841     0.00000000     0.00000000
+ H      1   2   0     0.971985900753   104.32894284     0.00000000
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ O      0   0   0     0.000000000000     0.00000000     0.00000000
+ H      1   0   0     1.837047765085     0.00000000     0.00000000
+ H      1   2   0     1.836787158455   104.32894284     0.00000000
+
+Calling /mmhome/boittier/home/metatomic/python/examples/orca/metatomic-orca-client water_opt_EXT.extinp.tmp -b 127.0.0.1:8888  ... 
+
+
+External program completed successfully in 0.052 sec
+
+-------------------------------------------------   --------------------
+FINAL SINGLE POINT ENERGY (From external program)        -0.528602388219
+-------------------------------------------------   --------------------
+
+
+------------------
+CARTESIAN GRADIENT
+------------------
+
+   1   O   :   -0.000153940    0.000040881   -0.000017827
+   2   H   :    0.000082072   -0.000031877   -0.000072479
+   3   H   :    0.000071868   -0.000009004    0.000090306
+
+Difference to translation invariance:
+           :   -0.0000000000   -0.0000000000    0.0000000003
+
+Difference to rotation invariance:
+           :   -0.0002822215   -0.0001734541   -0.0000148245
+
+Norm of the Cartesian gradient     ...    0.0002282393
+RMS gradient                       ...    0.0000760798
+MAX gradient                       ...    0.0001539404
+                                *** OPTIMIZATION RUN DONE ***
+
+
+--------------------------------
+SUGGESTED CITATIONS FOR THIS RUN
+--------------------------------
+
+Below you find a list of papers that are relevant to this ORCA run
+We neither can nor want to force you to cite these papers, but we appreciate if you do
+You receive ORCA, which is the product of decades of hard work by many enthusiastic individuals, for free
+The only thing we kindly ask in return is that you cite our papers,
+We deeply appreciate it, if you show your appreciation for ORCA by not just citing the generic ORCA reference.
+
+Please note that relegating all ORCA citations to the supporting information does *not* help us.
+SI sections are not indexed - citations you put there will not count into any citation statistics
+But we need these citations in order to attract the funding resources that allow us to do what we are doing
+
+Therefore, if you are a happy ORCA user, please consider citing a few of the papers listed below in the main body of your paper
+
+In addition to the list printed below, the program has created the file water_opt.bibtex that contains the list in bibtex format
+You can import this file easily into all common literature databanks and citation aid programs
+
+
+List of essential papers. We consider these as the minimum necessary citations
+
+  1. Neese,F.
+     Software update: the ORCA program system, version 5.0
+     WIRES Comput. Molec. Sci., 2022 12(1)e1606
+     doi.org/10.1002/wcms.1606
+
+List of papers to cite with high priority. The work reported in these papers was absolutely
+necessary for this run to complete.
+Our perspective: the developers of density functionals and basis sets usually get cited in chemistry papers
+Good! But without the algorithms to do something with them, the functionals or basis sets would not do anything.
+Hence, in our opinion, the algorithm design and method developments papers are equally worthy of getting cited
+
+  1. Neese,F.
+     The SHARK Integral Generation and Digestion System
+     J. Comp. Chem., 2022  1-16
+     doi.org/10.1002/jcc.26942
+
+List of suggested additional citations. These are papers that are important in the 'surrounding' of 
+of this run, or papers that preceded the highly important papers. If you like your results we are grateful for a citation.
+
+  1. Neese,F.
+     The ORCA program system
+     WIRES Comput. Molec. Sci., 2012 2(1)73-78
+     doi.org/10.1002/wcms.81
+  2. Neese,F.
+     Software update: the ORCA program system, version 4.0
+     WIRES Comput. Molec. Sci., 2018 8(1)1-6
+     doi.org/10.1002/wcms.1327
+  3. Neese,F.; Wennmohs,F.; Becker,U.; Riplinger,C.
+     The ORCA quantum chemistry program package
+     J. Chem. Phys., 2020 152 Art. No. L224108
+     doi.org/10.1063/5.0004608
+
+List of optional additional citations
+
+  1. Neese,F.
+     Approximate second-order SCF convergence for spin unrestricted wavefunctions
+     Chem. Phys. Lett., 2000 325(1-3)93-98
+     doi.org/10.1016/s0009-2614(00)00662-x
+
+Timings for individual modules:
+
+Sum of individual times          ...        0.429 sec (=   0.007 min)
+Geometry relaxation              ...        0.051 sec (=   0.001 min)  12.0 %
+External energy and gradient     ...        0.378 sec (=   0.006 min)  88.0 %
+                             ****ORCA TERMINATED NORMALLY****
+TOTAL RUN TIME: 0 days 0 hours 0 minutes 0 seconds 963 msec
