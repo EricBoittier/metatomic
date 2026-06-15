@@ -83,6 +83,12 @@ class cmake_ext(build_ext):
             f"-DMETATOMIC_TORCH_SOURCE_DIR={METATOMIC_TORCH_SRC}",
         ]
 
+        cuda_host_compiler = os.environ.get(
+            "METATOMIC_CUDA_HOST_COMPILER", os.environ.get("CUDAHOSTCXX")
+        )
+        if cuda_host_compiler:
+            cmake_options.append(f"-DCMAKE_CUDA_HOST_COMPILER={cuda_host_compiler}")
+
         subprocess.run(
             ["cmake", source_dir, *cmake_options],
             cwd=build_dir,

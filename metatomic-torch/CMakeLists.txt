@@ -27,11 +27,14 @@ message(STATUS "Building metatomic-torch v${METATOMIC_TORCH_FULL_VERSION}")
 
 # strip any -dev/-rc suffix on the version since project(VERSION) does not support it
 string(REGEX REPLACE "([0-9]*)\\.([0-9]*)\\.([0-9]*).*" "\\1.\\2.\\3" METATOMIC_TORCH_VERSION ${METATOMIC_TORCH_FULL_VERSION})
+include(cmake/cuda-host-compiler.cmake)
 project(METATOMIC_TORCH
     VERSION ${METATOMIC_TORCH_VERSION}
     LANGUAGES CXX C
 )
 set(PROJECT_VERSION ${METATOMIC_TORCH_FULL_VERSION})
+
+include(cmake/cuda-host-compiler.cmake)
 
 option(METATOMIC_TORCH_TESTS "Build metatomic-torch C++ tests" OFF)
 include(GNUInstallDirs)

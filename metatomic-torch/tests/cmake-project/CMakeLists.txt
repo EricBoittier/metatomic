@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 
 message(STATUS "Running with CMake version ${CMAKE_VERSION}")
 
+include(../../cmake/cuda-host-compiler.cmake)
 project(metatomic-torch-test-cmake-project CXX)
+include(../../cmake/cuda-host-compiler.cmake)
 
 option(USE_CMAKE_SUBDIRECTORY OFF)
 

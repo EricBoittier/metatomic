@@ -136,6 +136,10 @@ behavior of tests:
   CUDA, since the default PyTorch version expects CUDA to be available. A
   possible workaround is to use the CPU-only version of PyTorch in the tests, by
   setting ``PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu``;
+- ``METATOMIC_CUDA_HOST_COMPILER`` (or ``CUDAHOSTCXX``) can be set to a GCC 13
+  (or older) ``g++`` when the default compiler is GCC 14+ and CMake fails while
+  enabling CUDA for PyTorch. The C++ tests keep using the main compiler; only
+  ``nvcc`` uses this host compiler;
 - ``PYTORCH_JIT=0`` can be used to disable Python to TorchScript compilation of
   code; producing error messages which should be easier to understand.
 

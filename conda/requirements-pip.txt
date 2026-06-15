@@ -1,0 +1,17 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+setuptools>=77
+packaging>=26
+setuptools-scm
+cmake
+tox>=4.39
+pytest
+pytest-cov
+coverage
+ruff
+numpy
+metatensor-torch>=0.9.0,<0.10
+metatensor-operations>=0.5.0,<0.6
+torch==2.12.*
+vesin>=0.5.6,<0.6
+vesin-torch>=0.5.6,<0.6
+ase
