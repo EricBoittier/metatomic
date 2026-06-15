@@ -1,0 +1,9 @@
+! ExtOpt Opt
+%maxcore 2000
+
+%method
+  ProgExt "/absolute/path/to/metatomic/python/examples/orca/metatomic-orca-external"
+  Ext_Params "--model /absolute/path/to/model-md.pt --extensions-directory /absolute/path/to/extensions"
+end
+
+* xyzfile 0 1 water.xyz
