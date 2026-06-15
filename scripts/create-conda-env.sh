@@ -45,6 +45,7 @@ Activate it (micromamba must not override conda on PATH):
 Or use the helper script from the repo root:
 
   source scripts/activate-metatomic-env.sh
+  which python   # should be ${CONDA_PREFIX}/bin/python
 
 On GPU nodes, load your CUDA module first if needed, then activate the env.
 METATOMIC_CUDA_HOST_COMPILER is set automatically to the conda GCC 13 g++.
