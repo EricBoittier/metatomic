@@ -3,6 +3,9 @@
 # Matches tox defaults: Python 3.13, PyTorch 2.12 (CUDA), metatensor-torch 0.9.x.
 # Includes GCC 13 for nvcc's host compiler when the system default is GCC 14+.
 #
+# Pip packages are installed by scripts/create-conda-env.sh (not listed here) because
+# conda's pip integration does not handle --extra-index-url reliably.
+#
 # On GPU clusters, load CUDA before activating, e.g.:
 #   module load gcc/gcc-14.2.0-openmpi-5.0.5-cuda-12.6.1
 #
@@ -10,9 +13,9 @@
 #   ./scripts/create-conda-env.sh
 #   conda activate metatomic-torch
 #
-# Build / test from a git checkout (editable installs are not supported):
-#   pip install --no-deps --no-build-isolation --check-build-dependencies python/metatomic_torch
-#   tox -e torch-tests-cxx,torch-tests
+# If `which python` still points to micromamba after activate, run:
+#   source "$(conda info --base)/etc/profile.d/conda.sh"
+#   conda activate metatomic-torch
 
 name: metatomic-torch
 channels:
@@ -25,5 +28,3 @@ dependencies:
   - gxx_linux-64=13
   - binutils_linux-64
   - pip
-  - pip:
-      - -r file:conda/requirements-pip.txt

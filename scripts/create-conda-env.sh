@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_NAME="${METATOMIC_CONDA_ENV:-metatomic-torch}"
 ENV_FILE="${ROOT}/environment.yml"
+PIP_REQUIREMENTS="${ROOT}/conda/requirements-pip.txt"
 ACTIVATE_HOOK="${ROOT}/conda/activate-metatomic-cuda-host.sh"
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -20,14 +21,25 @@ else
 fi
 
 CONDA_PREFIX="$(conda run -n "${ENV_NAME}" python -c "import os; print(os.environ['CONDA_PREFIX'])")"
+ENV_PYTHON="${CONDA_PREFIX}/bin/python"
+
+echo "Installing pip packages into ${ENV_NAME}"
+"${ENV_PYTHON}" -m pip install -r "${PIP_REQUIREMENTS}"
+
 mkdir -p "${CONDA_PREFIX}/etc/conda/activate.d"
 install -m 0755 "${ACTIVATE_HOOK}" "${CONDA_PREFIX}/etc/conda/activate.d/metatomic-cuda-host.sh"
 
+CONDA_BASE="$(conda info --base)"
+
 cat <<EOF
 
-Environment '${ENV_NAME}' is ready.
+Environment '${ENV_NAME}' is ready at ${CONDA_PREFIX}
 
+Activate it (micromamba must not override conda on PATH):
+
+  source "${CONDA_BASE}/etc/profile.d/conda.sh"
   conda activate ${ENV_NAME}
+  which python   # should be ${CONDA_PREFIX}/bin/python
 
 On GPU nodes, load your CUDA module first if needed, then activate the env.
 METATOMIC_CUDA_HOST_COMPILER is set automatically to the conda GCC 13 g++.
