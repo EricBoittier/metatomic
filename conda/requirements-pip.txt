@@ -2,6 +2,7 @@
 setuptools>=77
 packaging>=26
 setuptools-scm
+cmake
 tox>=4.39
 pytest
 pytest-cov
