@@ -203,15 +203,46 @@ int main(void) {
     }
     mta_string_free(capabilities);
 
-    /* Asking a plugin for a model it does not know must fail cleanly. */
+    /* Asking a plugin for a model it does not know must fail cleanly.
+       The plugin callback returns MTA_MODEL_NOT_SUPPORTED_ERROR; with a
+       named plugin, mta_load_model wraps that as MTA_INVALID_PARAMETER_ERROR. */
+    mta_model_t scratch = {0};
+    if (demo_load_model("not-a-real-model", "{}", &scratch)
+        != MTA_MODEL_NOT_SUPPORTED_ERROR) {
+        fprintf(stderr,
+                "assertion failed: plugin should return MTA_MODEL_NOT_SUPPORTED_ERROR\n");
+        model.unload(model.data);
+        return EXIT_FAILURE;
+    }
+    printf("plugin load_model status for unknown name: %d\n",
+           (int)MTA_MODEL_NOT_SUPPORTED_ERROR);
+
     mta_model_t missing = {0};
     mta_status_t status =
         mta_load_model("not-a-real-model", "{}", "tutorial-demo-plugin", &missing);
     if (status == MTA_SUCCESS) {
-        fprintf(stderr, "expected load of unknown model to fail\n");
+        fprintf(stderr, "assertion failed: expected load of unknown model to fail\n");
         missing.unload(missing.data);
         model.unload(model.data);
         return EXIT_FAILURE;
+    }
+    if (status != MTA_INVALID_PARAMETER_ERROR) {
+        fprintf(stderr,
+                "assertion failed: expected MTA_INVALID_PARAMETER_ERROR, got %d\n",
+                (int)status);
+        model.unload(model.data);
+        return EXIT_FAILURE;
+    }
+    {
+        const char* message = NULL;
+        mta_last_error(&message, NULL, NULL);
+        if (message == NULL || strstr(message, "tutorial-demo-plugin") == NULL) {
+            fprintf(stderr,
+                    "assertion failed: error should name the plugin, got: %s\n",
+                    message != NULL ? message : "(none)");
+            model.unload(model.data);
+            return EXIT_FAILURE;
+        }
     }
     print_last_error("unknown model");
 
@@ -249,5 +280,6 @@ int main(void) {
 //     registered plugin 'tutorial-demo-plugin'
 //     loaded model 'plugin-demo'
 //     capabilities: {"type": "metatomic_model_capabilities", ...}
+//     plugin load_model status for unknown name: 6
 //     unknown model: invalid parameter: failed to load model from
 //     'not-a-real-model': plugin 'tutorial-demo-plugin' could not load the model

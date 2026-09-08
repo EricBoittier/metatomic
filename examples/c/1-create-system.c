@@ -224,9 +224,36 @@ DLManagedTensorVersioned *pbc = tensor_from_data(
 // :c:func:`mta_system_create` takes ownership of the four DLPack tensors;
 // they must not be used afterwards. The returned :c:type:`mta_system_t`
 // must be freed with :c:func:`mta_system_free` once you are done with it.
+// Passing NULL tensors is rejected before any ownership transfer.
+
+mta_system_t* rejected = NULL;
+mta_status_t status = mta_system_create(
+    "Angstrom", NULL, NULL, NULL, NULL, &rejected
+);
+if (status == MTA_SUCCESS) {
+    fprintf(stderr, "assertion failed: mta_system_create should reject NULL tensors\n");
+    mta_system_free(rejected);
+    return EXIT_FAILURE;
+}
+if (status != MTA_INVALID_PARAMETER_ERROR) {
+    fprintf(stderr,
+            "assertion failed: expected MTA_INVALID_PARAMETER_ERROR, got %d\n",
+            (int)status);
+    return EXIT_FAILURE;
+}
+{
+    const char* error_message = NULL;
+    mta_last_error(&error_message, /*origin=*/NULL, /*data=*/NULL);
+    if (error_message == NULL || strstr(error_message, "NULL") == NULL) {
+        fprintf(stderr, "assertion failed: error should mention NULL, got: %s\n",
+                error_message != NULL ? error_message : "(none)");
+        return EXIT_FAILURE;
+    }
+}
+printf("NULL tensors are rejected (status=%d)\n", (int)status);
 
 mta_system_t* system = NULL;
-mta_status_t status = mta_system_create(
+status = mta_system_create(
     "Angstrom", types, positions, cell, pbc, &system
 );
 
@@ -281,3 +308,13 @@ if (status != MTA_SUCCESS) {
 // %%
 
 return EXIT_SUCCESS; }
+
+// %%
+//
+// Expected output
+// ---------------
+//
+// ::
+//
+//     NULL tensors are rejected (status=1)
+//     created system with 4 atoms

@@ -208,6 +208,7 @@ static mta_status_t lj_requested_inputs(const void* model_data, mta_string_t* ou
 // The engine attaches a half neighbor list with :c:func:`mta_system_add_pairs`.
 // The model reads pair displacement vectors from that block, sums the shifted
 // Lennard-Jones pair terms, and writes a system-level energy TensorMap.
+// A missing neighbor list is an error (not a silent zero energy).
 // ``simple_array.h`` is a C stand-in for ``metatensor::SimpleDataArray``.
 
 static mts_tensormap_t* scalar_tensormap(double value) {
@@ -272,13 +273,21 @@ static mta_status_t lj_energy_of_system(
     lj_format_pair_options(lj, options, sizeof(options));
 
     const mts_block_t* pairs = NULL;
-    if (mta_system_get_pairs(system, options, &pairs) != MTA_SUCCESS) {
+    mta_status_t status = mta_system_get_pairs(system, options, &pairs);
+    if (status != MTA_SUCCESS) {
+        /* Missing neighbor lists are an error, not silent zeros. */
+        return status;
+    }
+    if (pairs == NULL) {
+        mta_set_last_error(
+            "pair list pointer is NULL after a successful get_pairs",
+            "lj_execute_inner",
+            NULL,
+            NULL
+        );
         return MTA_INTERNAL_ERROR;
     }
     *energy = 0.0;
-    if (pairs == NULL) {
-        return MTA_SUCCESS;
-    }
 
     mts_array_t array;
     memset(&array, 0, sizeof(array));
@@ -293,6 +302,15 @@ static mta_status_t lj_energy_of_system(
     uintptr_t ndim = 0;
     if (array.shape(array.ptr, &shape, &ndim) != MTS_SUCCESS || ndim < 1) {
         return lj_fail_mts("failed to get pair list shape");
+    }
+    if (ndim != 3 || shape[1] != 3 || shape[2] != 1) {
+        mta_set_last_error(
+            "pair list values must have shape [n_pairs, 3, 1] (xyz displacement, one property)",
+            "lj_execute_inner",
+            NULL,
+            NULL
+        );
+        return MTA_INVALID_PARAMETER_ERROR;
     }
     uintptr_t n_pairs = shape[0];
 
@@ -340,6 +358,30 @@ static mta_status_t lj_execute_inner(
 ) {
     (void)selected_atoms;
     (void)requested_outputs_json;
+
+    if (model_data == NULL) {
+        mta_set_last_error("model_data is NULL", "lj_execute_inner", NULL, NULL);
+        return MTA_INVALID_PARAMETER_ERROR;
+    }
+    if (systems_count > 0 && systems == NULL) {
+        mta_set_last_error(
+            "systems is NULL but systems_count is not 0",
+            "lj_execute_inner",
+            NULL,
+            NULL
+        );
+        return MTA_INVALID_PARAMETER_ERROR;
+    }
+    if (outputs_count > 0 && outputs == NULL) {
+        mta_set_last_error(
+            "outputs is NULL but outputs_count is not 0",
+            "lj_execute_inner",
+            NULL,
+            NULL
+        );
+        return MTA_INVALID_PARAMETER_ERROR;
+    }
+
     const LennardJonesModel* lj = (const LennardJonesModel*)model_data;
 
     double energy = 0.0;
@@ -404,6 +446,23 @@ static mta_status_t lj_load_model(
     model->requested_inputs = lj_requested_inputs;
     model->execute_inner = lj_execute_inner;
     return MTA_SUCCESS;
+}
+
+static int die(
+    mta_model_t* model,
+    mta_system_t* system,
+    mts_tensormap_t* tensor,
+    const char* what
+) {
+    fprintf(stderr, "assertion failed: %s\n", what);
+    mts_tensormap_free(tensor);
+    if (system != NULL) {
+        mta_system_free(system);
+    }
+    if (model != NULL && model->unload != NULL && model->data != NULL) {
+        model->unload(model->data);
+    }
+    return EXIT_FAILURE;
 }
 
 static int fail(mta_model_t* model, mta_system_t* system, const char* what) {
@@ -491,6 +550,38 @@ static int read_scalar_energy(mts_tensormap_t* tensor, double* out) {
     return 0;
 }
 
+static int run_energy(
+    mta_model_t* model,
+    const mta_system_t* system,
+    uintptr_t n_systems,
+    double* energy_out
+) {
+    static const char* requested =
+        "[{\"type\":\"metatomic_quantity\",\"name\":\"energy\","
+        "\"unit\":\"eV\",\"gradients\":[],\"sample_kind\":\"system\"}]";
+    mts_tensormap_t* energy = NULL;
+    const mta_system_t* systems[1] = {system};
+    mta_status_t status = model->execute_inner(
+        model->data,
+        n_systems == 0 ? NULL : systems,
+        n_systems,
+        NULL,
+        requested,
+        &energy,
+        1
+    );
+    if (status != MTA_SUCCESS || energy == NULL) {
+        mts_tensormap_free(energy);
+        return -1;
+    }
+    if (read_scalar_energy(energy, energy_out) != 0) {
+        mts_tensormap_free(energy);
+        return -2;
+    }
+    mts_tensormap_free(energy);
+    return 0;
+}
+
 // %%
 
 int main(void) {
@@ -507,6 +598,10 @@ int main(void) {
     if (mta_load_model("lennard-jones", "{}", "tutorial-lj-plugin", &model)
         != MTA_SUCCESS) {
         return fail(NULL, NULL, "failed to load model");
+    }
+    if (model.data == NULL || model.execute_inner == NULL
+        || model.requested_pair_lists == NULL || model.unload == NULL) {
+        return die(&model, NULL, NULL, "loaded model is missing vtable entries");
     }
 
     mta_string_t metadata = NULL;
@@ -545,6 +640,73 @@ int main(void) {
     }
     mta_string_free(pairs);
 
+    /* A plugin signals "not my model" with MTA_MODEL_NOT_SUPPORTED_ERROR.
+       mta_load_model with a named plugin wraps that as
+       MTA_INVALID_PARAMETER_ERROR so the engine can fail the load. */
+    mta_model_t scratch = {0};
+    if (lj_load_model("einstein-solid", "{}", &scratch)
+        != MTA_MODEL_NOT_SUPPORTED_ERROR) {
+        return die(
+            &model, NULL, NULL,
+            "plugin load_model must return MTA_MODEL_NOT_SUPPORTED_ERROR for unknown names"
+        );
+    }
+    printf(
+        "plugin load_model status for unknown name: %d\n",
+        (int)MTA_MODEL_NOT_SUPPORTED_ERROR
+    );
+
+    mta_model_t rejected = {0};
+    mta_status_t unsupported = mta_load_model(
+        "einstein-solid", "{}", "tutorial-lj-plugin", &rejected
+    );
+    if (unsupported == MTA_SUCCESS) {
+        rejected.unload(rejected.data);
+        return die(&model, NULL, NULL, "mta_load_model should reject unknown models");
+    }
+    if (unsupported != MTA_INVALID_PARAMETER_ERROR) {
+        return die(
+            &model, NULL, NULL,
+            "named-plugin mta_load_model wraps MTA_MODEL_NOT_SUPPORTED_ERROR as MTA_INVALID_PARAMETER_ERROR"
+        );
+    }
+    {
+        const char* message = NULL;
+        mta_last_error(&message, NULL, NULL);
+        if (message == NULL || strstr(message, "tutorial-lj-plugin") == NULL) {
+            return die(
+                &model, NULL, NULL,
+                "mta_load_model error should name the plugin that could not load the model"
+            );
+        }
+    }
+    printf("mta_load_model status for unknown name: %d\n", (int)unsupported);
+
+    if (model.execute_inner(NULL, NULL, 0, NULL, "[]", NULL, 0)
+        != MTA_INVALID_PARAMETER_ERROR) {
+        return die(
+            &model, NULL, NULL,
+            "execute_inner should reject a NULL model pointer"
+        );
+    }
+    mts_tensormap_t* dummy = NULL;
+    if (model.execute_inner(model.data, NULL, 1, NULL, "[]", &dummy, 1)
+        != MTA_INVALID_PARAMETER_ERROR) {
+        mts_tensormap_free(dummy);
+        return die(
+            &model, NULL, NULL,
+            "execute_inner should reject systems=NULL when n_systems > 0"
+        );
+    }
+    if (model.execute_inner(model.data, NULL, 0, NULL, "[]", NULL, 1)
+        != MTA_INVALID_PARAMETER_ERROR) {
+        return die(
+            &model, NULL, NULL,
+            "execute_inner should reject outputs=NULL when n_outputs > 0"
+        );
+    }
+    printf("execute_inner rejects invalid arguments\n");
+
     int32_t types_data[] = {LJ_ATOMIC_TYPE, LJ_ATOMIC_TYPE};
     double positions_data[] = {
         0.0, 0.0, 0.0,
@@ -582,6 +744,30 @@ int main(void) {
         return fail(&model, system, "failed to create dimer system");
     }
 
+    uintptr_t n_atoms = 0;
+    if (mta_system_size(system, &n_atoms) != MTA_SUCCESS || n_atoms != 2) {
+        return die(&model, system, NULL, "dimer should contain 2 atoms");
+    }
+
+    double unused = 1.0;
+    if (run_energy(&model, system, 1, &unused) == 0) {
+        return die(
+            &model, system, NULL,
+            "execute_inner should fail when the requested pair list is missing"
+        );
+    }
+    {
+        const char* message = NULL;
+        mta_last_error(&message, NULL, NULL);
+        if (message == NULL || strstr(message, "no pair list") == NULL) {
+            return die(
+                &model, system, NULL,
+                "missing neighbor list error should mention 'no pair list'"
+            );
+        }
+    }
+    printf("missing pair list is rejected\n");
+
     mts_block_t* pair_block = make_displacement_pair_block(LJ_SIGMA, 0.0, 0.0);
     if (pair_block == NULL) {
         return fail(&model, system, "failed to build pair list");
@@ -592,42 +778,47 @@ int main(void) {
         mts_block_free(pair_block);
         return fail(&model, system, "failed to add pair list");
     }
-
-    mts_tensormap_t* energy = NULL;
-    const char* requested =
-        "[{\"type\":\"metatomic_quantity\",\"name\":\"energy\","
-        "\"unit\":\"eV\",\"gradients\":[],\"sample_kind\":\"system\"}]";
-    const mta_system_t* systems[] = {system};
-    status = model.execute_inner(
-        model.data,
-        systems,
-        1,
-        NULL,
-        requested,
-        &energy,
-        1
-    );
-    if (status != MTA_SUCCESS || energy == NULL) {
-        mts_tensormap_free(energy);
-        return fail(&model, system, "execute_inner failed");
+    {
+        const mts_block_t* got_pairs = NULL;
+        if (mta_system_get_pairs(system, pair_options, &got_pairs) != MTA_SUCCESS
+            || got_pairs == NULL) {
+            return fail(&model, system, "pair list should be retrievable after add_pairs");
+        }
     }
 
     double got = 0.0;
-    if (read_scalar_energy(energy, &got) != 0) {
-        mts_tensormap_free(energy);
-        return fail(&model, system, "failed to read energy TensorMap");
+    if (run_energy(&model, system, 1, &got) != 0) {
+        return fail(&model, system, "execute_inner failed");
     }
     double expected = -((const LennardJonesModel*)model.data)->shift;
     printf("energy at r=sigma: %.12f eV\n", got);
     if (fabs(got - expected) > 1e-10) {
         fprintf(stderr, "expected %.12f eV, got %.12f eV\n", expected, got);
-        mts_tensormap_free(energy);
-        mta_system_free(system);
-        model.unload(model.data);
-        return EXIT_FAILURE;
+        return die(&model, system, NULL, "shifted LJ energy at r=sigma should be -E_shift");
     }
 
-    mts_tensormap_free(energy);
+    mts_block_t* duplicate = make_displacement_pair_block(LJ_SIGMA, 0.0, 0.0);
+    if (duplicate == NULL) {
+        return fail(&model, system, "failed to rebuild pair list");
+    }
+    if (mta_system_add_pairs(system, pair_options, duplicate) == MTA_SUCCESS) {
+        return die(
+            &model, system, NULL,
+            "a second add_pairs with the same options should fail"
+        );
+    }
+    {
+        const char* message = NULL;
+        mta_last_error(&message, NULL, NULL);
+        if (message == NULL || strstr(message, "already exists") == NULL) {
+            return die(
+                &model, system, NULL,
+                "duplicate add_pairs error should say the pair list already exists"
+            );
+        }
+    }
+    printf("duplicate pair list is rejected\n");
+
     mta_system_free(system);
     model.unload(model.data);
     return EXIT_SUCCESS;
@@ -651,5 +842,9 @@ int main(void) {
 //     - metatomic C tutorials
 //
 //     requested pair lists: [{"type": "metatomic_pair_options","cutoff": "0x400b333333333333","full_list": false,"strict": true,"requestors": ["lennard-jones"]}]
-//
+//     plugin load_model status for unknown name: 6
+//     mta_load_model status for unknown name: 1
+//     execute_inner rejects invalid arguments
+//     missing pair list is rejected
 //     energy at r=sigma: 0.673360663351 eV
+//     duplicate pair list is rejected

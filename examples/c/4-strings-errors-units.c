@@ -92,7 +92,13 @@ static int demo_errors(void) {
     double factor = 0.0;
     mta_status_t status = mta_unit_conversion_factor("m", "kg", &factor);
     if (status == MTA_SUCCESS) {
-        fprintf(stderr, "expected a dimension mismatch\n");
+        fprintf(stderr, "assertion failed: expected a dimension mismatch\n");
+        return EXIT_FAILURE;
+    }
+    if (status != MTA_INVALID_PARAMETER_ERROR) {
+        fprintf(stderr,
+                "assertion failed: dimension mismatch should be MTA_INVALID_PARAMETER_ERROR, got %d\n",
+                (int)status);
         return EXIT_FAILURE;
     }
 
@@ -184,6 +190,31 @@ static int demo_format_metadata(void) {
         return EXIT_FAILURE;
     }
     mta_string_free(printed);
+
+    mta_string_t rejected = NULL;
+    mta_status_t status = mta_format_metadata("{not-json", &rejected);
+    if (status == MTA_SUCCESS) {
+        fprintf(stderr, "assertion failed: invalid JSON should fail\n");
+        mta_string_free(rejected);
+        return EXIT_FAILURE;
+    }
+    if (status != MTA_SERIALIZATION_ERROR) {
+        fprintf(stderr,
+                "assertion failed: invalid JSON should yield MTA_SERIALIZATION_ERROR, got %d\n",
+                (int)status);
+        return EXIT_FAILURE;
+    }
+    {
+        const char* message = NULL;
+        mta_last_error(&message, NULL, NULL);
+        if (message == NULL || strstr(message, "JSON") == NULL) {
+            fprintf(stderr,
+                    "assertion failed: error should mention JSON, got: %s\n",
+                    message != NULL ? message : "(none)");
+            return EXIT_FAILURE;
+        }
+    }
+    printf("invalid metadata JSON is rejected (status=%d)\n", (int)status);
     return EXIT_SUCCESS;
 }
 
@@ -245,3 +276,4 @@ int main(void) {
 //         atomistic machine learning
 //     - about the implementation of this model:
 //       * https://github.com/metatensor/metatomic
+//     invalid metadata JSON is rejected (status=3)
