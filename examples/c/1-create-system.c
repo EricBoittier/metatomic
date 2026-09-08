@@ -24,13 +24,15 @@
 // --------------
 //
 // This tutorial shows a basic way to create DLPack tensors from existing data.
-// You should also explore the corresponding documentation in the DLPack header
-// file, which describes the full DLPack API and options.
+// You should also explore the `DLPack documentation
+// <https://dmlc.github.io/dlpack/latest/>`_ and the corresponding `C header
+// <https://github.com/dmlc/dlpack/blob/main/include/dlpack/dlpack.h>`_, which
+// describe the full DLPack API and options.
 //
 // We get the dlpack header from the vendored version in the metatensor package,
 // which is the same that metatomic uses internally. You can also bring your own
 // copy of the DLPack header, or use the one from your framework (PyTorch,
-// TensorFlow, …) as long at it is at least version 1.0.
+// TensorFlow, …) as long as it is at least version 1.0.
 
 #include <metatensor/dlpack/dlpack.h>
 
@@ -241,18 +243,23 @@ if (status != MTA_SUCCESS) {
 // --------------
 //
 // Now that we have a :c:type:`mta_system_t`, we can use it with the rest of the
-// metatomic API, pass it to a model, etc. Here we just query its size and print
-// it.
+// metatomic API, pass it to a model, etc. Here we query its size and check the
+// value so this example fails loudly if wrapping the arrays went wrong.
 
 uintptr_t size = 0;
 status = mta_system_size(system, &size);
-if (status == MTA_SUCCESS) {
-    printf("created system with %lu atoms\n", (unsigned long)size);
-} else {
-    printf("failed to get system size\n");
+if (status != MTA_SUCCESS) {
+    fprintf(stderr, "failed to get system size\n");
     mta_system_free(system);
     return EXIT_FAILURE;
 }
+if (size != (uintptr_t)n_atoms) {
+    fprintf(stderr, "expected %ld atoms, got %lu\n",
+            (long)n_atoms, (unsigned long)size);
+    mta_system_free(system);
+    return EXIT_FAILURE;
+}
+printf("created system with %lu atoms\n", (unsigned long)size);
 
 
 // %%
@@ -263,7 +270,13 @@ if (status == MTA_SUCCESS) {
 // Free the system once it is no longer needed. The DLPack tensors have already
 // been consumed by ``mta_system_create`` and must not be freed again.
 
-mta_system_free(system);
+status = mta_system_free(system);
+if (status != MTA_SUCCESS) {
+    const char* error_message = NULL;
+    mta_last_error(&error_message, /*origin=*/NULL, /*data=*/NULL);
+    fprintf(stderr, "failed to free system: %s\n", error_message);
+    return EXIT_FAILURE;
+}
 
 // %%
 

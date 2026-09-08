@@ -283,6 +283,13 @@ int main(void) {
         return fail(&model, "failed to format metadata");
     }
     printf("%s\n", mta_string_view(printed));
+    if (strstr(mta_string_view(printed), "lennard-jones") == NULL) {
+        fprintf(stderr, "formatted metadata missing model name\n");
+        mta_string_free(metadata);
+        mta_string_free(printed);
+        model.unload(model.data);
+        return EXIT_FAILURE;
+    }
     mta_string_free(metadata);
     mta_string_free(printed);
 
@@ -290,7 +297,16 @@ int main(void) {
     if (model.requested_pair_lists(model.data, &pairs) != MTA_SUCCESS) {
         return fail(&model, "failed to get requested pair lists");
     }
-    printf("requested pair lists: %s\n", mta_string_view(pairs));
+    const char* pairs_json = mta_string_view(pairs);
+    printf("requested pair lists: %s\n", pairs_json);
+    if (strstr(pairs_json, "0x400b333333333333") == NULL
+        || strstr(pairs_json, "\"full_list\": false") == NULL
+        || strstr(pairs_json, "\"strict\": true") == NULL) {
+        fprintf(stderr, "unexpected pair-list request: %s\n", pairs_json);
+        mta_string_free(pairs);
+        model.unload(model.data);
+        return EXIT_FAILURE;
+    }
     mta_string_free(pairs);
 
     printf("execute_inner is WIP; energy TensorMaps will be added later\n");

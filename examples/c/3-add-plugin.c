@@ -195,6 +195,12 @@ int main(void) {
         return EXIT_FAILURE;
     }
     printf("capabilities: %s\n", mta_string_view(capabilities));
+    if (strstr(mta_string_view(capabilities), "metatomic_model_capabilities") == NULL) {
+        fprintf(stderr, "unexpected capabilities JSON\n");
+        mta_string_free(capabilities);
+        model.unload(model.data);
+        return EXIT_FAILURE;
+    }
     mta_string_free(capabilities);
 
     /* Asking a plugin for a model it does not know must fail cleanly. */

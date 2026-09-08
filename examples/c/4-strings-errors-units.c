@@ -26,6 +26,11 @@ static int demo_strings(void) {
     if (hello == NULL) {
         return EXIT_FAILURE;
     }
+    if (strcmp(mta_string_view(hello), "Angstrom") != 0) {
+        fprintf(stderr, "unexpected string view: %s\n", mta_string_view(hello));
+        mta_string_free(hello);
+        return EXIT_FAILURE;
+    }
     printf("string view: %s\n", mta_string_view(hello));
     mta_string_free(hello);
     mta_string_free(NULL);
@@ -47,14 +52,26 @@ static int demo_units(void) {
     if (mta_unit_conversion_factor("m", "m", &factor) != MTA_SUCCESS) {
         return EXIT_FAILURE;
     }
+    if (factor != 1.0) {
+        fprintf(stderr, "m -> m: expected 1.0, got %.12f\n", factor);
+        return EXIT_FAILURE;
+    }
     printf("m -> m: %.1f\n", factor);
 
     if (mta_unit_conversion_factor("kJ/mol", "eV", &factor) != MTA_SUCCESS) {
         return EXIT_FAILURE;
     }
+    if (fabs(factor - 0.010364269656) > 1e-12) {
+        fprintf(stderr, "kJ/mol -> eV: unexpected factor %.12f\n", factor);
+        return EXIT_FAILURE;
+    }
     printf("kJ/mol -> eV: %.12f\n", factor);
 
     if (mta_unit_conversion_factor("Angstrom", "nm", &factor) != MTA_SUCCESS) {
+        return EXIT_FAILURE;
+    }
+    if (fabs(factor - 0.1) > 1e-15) {
+        fprintf(stderr, "Angstrom -> nm: expected 0.1, got %.12f\n", factor);
         return EXIT_FAILURE;
     }
     printf("Angstrom -> nm: %.3f\n", factor);
@@ -82,6 +99,11 @@ static int demo_errors(void) {
     const char* message = NULL;
     const char* origin = NULL;
     mta_last_error(&message, &origin, NULL);
+    if (message == NULL || strstr(message, "dimension mismatch") == NULL) {
+        fprintf(stderr, "expected a dimension-mismatch error, got: %s\n",
+                message != NULL ? message : "(none)");
+        return EXIT_FAILURE;
+    }
     printf("status: %d\n", (int)status);
     printf("error: %s\n", message != NULL ? message : "(none)");
 
@@ -94,6 +116,13 @@ static int demo_errors(void) {
     message = NULL;
     origin = NULL;
     mta_last_error(&message, &origin, NULL);
+    if (message == NULL || strcmp(message, "tutorial-triggered error") != 0
+        || origin == NULL || strcmp(origin, "demo_errors") != 0) {
+        fprintf(stderr, "unexpected custom error: %s (origin=%s)\n",
+                message != NULL ? message : "(none)",
+                origin != NULL ? origin : "(none)");
+        return EXIT_FAILURE;
+    }
     printf("custom error: %s (origin=%s)\n", message, origin);
     return EXIT_SUCCESS;
 }
@@ -149,6 +178,11 @@ static int demo_format_metadata(void) {
         return EXIT_FAILURE;
     }
     printf("%s", mta_string_view(printed));
+    if (strstr(mta_string_view(printed), "tutorial-demo") == NULL) {
+        fprintf(stderr, "formatted metadata missing model name\n");
+        mta_string_free(printed);
+        return EXIT_FAILURE;
+    }
     mta_string_free(printed);
     return EXIT_SUCCESS;
 }
