@@ -29,7 +29,6 @@
 //     calls ``execute_inner`` directly.
 
 #include <inttypes.h>
-#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -95,15 +94,10 @@ static void lj_format_pair_options(const LennardJonesModel* lj, char* buf, size_
 }
 
 static double lj_pair_term(double r2, const LennardJonesModel* lj) {
-    if (r2 <= 0.0) {
+    if (r2 <= 0.0 || r2 >= lj->cutoff * lj->cutoff) {
         return 0.0;
     }
-    double r = sqrt(r2);
-    if (r >= lj->cutoff) {
-        return 0.0;
-    }
-    double inv = lj->sigma / r;
-    double inv2 = inv * inv;
+    double inv2 = (lj->sigma * lj->sigma) / r2;
     double inv6 = inv2 * inv2 * inv2;
     double inv12 = inv6 * inv6;
     return 4.0 * lj->epsilon * (inv12 - inv6) - lj->shift;
@@ -792,7 +786,11 @@ int main(void) {
     }
     double expected = -((const LennardJonesModel*)model.data)->shift;
     printf("energy at r=sigma: %.12f eV\n", got);
-    if (fabs(got - expected) > 1e-10) {
+    double err = got - expected;
+    if (err < 0.0) {
+        err = -err;
+    }
+    if (err > 1e-10) {
         fprintf(stderr, "expected %.12f eV, got %.12f eV\n", expected, got);
         return die(&model, system, NULL, "shifted LJ energy at r=sigma should be -E_shift");
     }
