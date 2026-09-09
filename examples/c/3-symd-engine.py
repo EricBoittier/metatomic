@@ -23,12 +23,12 @@ branch (not part of this repository). Every result plotted below comes from
 actually running the compiled ``symd`` binary, not from replaying saved
 numbers. To isolate *just* the C API bridge -- not symd's neighbor-list
 bookkeeping, not its symmetry machinery -- it runs the simplest possible
-scenario: a small free (non-periodic) cluster of particles under NVE, where
-whether energy is conserved is a direct, unambiguous check on whether the
-physics coming back through the C API is correct.
+scenario: a small free (non-periodic) 3D cluster of particles under NVE,
+where whether energy is conserved is a direct, unambiguous check on whether
+the physics coming back through the C API is correct.
 """
 
-# sphinx_gallery_thumbnail_number = 2
+# sphinx_gallery_thumbnail_number = 3
 
 import json
 import os
@@ -37,6 +37,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import ase
+import chemiscope
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -100,15 +102,14 @@ import numpy as np
 #        );
 #
 #    This only became available partway through this exercise
-#    (``metatomic-core@8b0d8975``); earlier revisions called ``execute_inner``
-#    directly to work around it still being ``todo!()``.
+#    (``metatomic-core@8b0d8975``); earlier revisions of this code called
+#    ``execute_inner`` directly, since ``mta_execute_model`` was not ready yet.
 # #. **The model runs.** ``mtm_lj_execute_inner`` -- called internally by
 #    :c:func:`mta_execute_model` through the ``execute_inner`` function pointer.
 # #. **The model returns its outputs.** A :py:class:`TensorMap`-shaped
 #    ``"energy"`` output, with a ``"positions"`` gradient block attached --
-#    the C API tutorials stop at energy-only ("position gradients are still
-#    TODO"); driving a real engine needs the gradient filled in, since that
-#    *is* the force.
+#    the C API tutorials only cover the energy itself; driving a real engine
+#    needs the gradient filled in too, since that *is* the force.
 # #. **The engine runs backward() for gradients, if needed.** Not used here:
 #    the C API has no autodiff pass. Forces come back already computed, as
 #    the ``"positions"`` gradient block from point 11 -- exactly the
@@ -120,7 +121,7 @@ import numpy as np
 # Setting up a run
 # ----------------
 #
-# Eight particles in a small 2D cluster, in a box much larger than the
+# Eight particles in a small 3D cluster, in a box much larger than the
 # interaction cutoff -- so there is nothing for symd's own neighbor list to
 # do beyond simple distance checks, and nothing for the C API bridge to get
 # wrong. ``p1`` is symd's trivial symmetry group (one member, the identity):
@@ -128,21 +129,24 @@ import numpy as np
 # any actual constraint.
 
 P1_GROUP = {
-    "name": "p1", "size": 1, "dof": 2,
-    "members": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],
-    "projector": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    "name": "p1", "size": 1, "dof": 3,
+    # a single 4x4 identity (homogeneous 3D transform: rotation + translation)
+    "members": [np.eye(4).flatten().tolist()],
+    # symd projects box updates through this at startup regardless of
+    # box_update_period -- a 9x9 identity imposes no shape constraint
+    "projector": np.eye(9).flatten().tolist(),
 }
-# a compact 2x4 grid, spacing 1.15 sigma, small jitter -- fractional
-# coordinates in a 20x20 box (sigma = 1, cutoff = 3 sigma: nothing here is
+# a compact 2x2x2 grid, spacing 1.15 sigma, small jitter -- fractional
+# coordinates in a 20x20x20 box (sigma = 1, cutoff = 3 sigma: nothing here is
 # within reach of a periodic image of itself or of another particle)
-CLUSTER_XYZ = """0.413752 0.471698
-0.470839 0.469914
-0.528068 0.469763
-0.586340 0.473260
-0.413012 0.527819
-0.471985 0.529285
-0.528908 0.527354
-0.586206 0.529793
+CLUSTER_XYZ = """0.471774 0.472290 0.471487
+0.527936 0.471160 0.470411
+0.471862 0.531352 0.471160
+0.528342 0.530077 0.472434
+0.471930 0.470446 0.529355
+0.530315 0.469826 0.528712
+0.468920 0.527408 0.526636
+0.528920 0.527441 0.529805
 """
 
 
@@ -156,7 +160,7 @@ def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
         # NVE: no thermostat, no pressure coupling -- total energy should be
         # conserved, full stop, and any drift is a bug in the force.
         "steps": steps, "time_step": 0.005,
-        "cell": [20, 20], "n_images": 0, "n_particles": 8,
+        "cell": [20, 20, 20], "n_images": 0, "n_particles": 8,
         "start_positions": "cluster.xyz",
         "print_period": print_period, "positions_log_file": "positions.xyz",
         "position_log_period": print_period, "force_type": force_type,
@@ -192,7 +196,7 @@ def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
         coords = []
         for _ in range(n_atoms):
             parts = xyz_lines[i].split()
-            coords.append((float(parts[1]), float(parts[2])))
+            coords.append((float(parts[1]), float(parts[2]), float(parts[3])))
             i += 1
         frames.append(np.array(coords))
 
@@ -209,7 +213,7 @@ def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
 # seed, both NVE.
 
 SYMD_BUILD = Path(os.environ.get("SYMD_BUILD_DIR", "/home/ericb/metawork/etc/symd/build"))
-symd_binary = SYMD_BUILD / "symd2"  # N_DIMS=2, matches this 2D cluster
+symd_binary = SYMD_BUILD / "symd3"  # N_DIMS=3, matches this 3D cluster
 
 traces = {}
 frames_by_type = {}
@@ -230,32 +234,35 @@ for name, rows in traces.items():
 # The cluster, in motion
 # -----------------------
 #
-# The actual 2D system, straight from symd's own trajectory log, at six
-# points across the run -- each particle keeps its color across panels so
-# you can follow it.
+# The actual 3D trajectories, straight from symd's own log, one
+# `chemiscope <https://chemiscope.org>`_ viewer per force type -- drag to
+# rotate, use the play button to step through time. Both start from the
+# identical 2x2x2 grid.
 
-mtm_frames = frames_by_type["metatomic"]
-snapshot_idx = np.linspace(0, len(mtm_frames) - 1, 6).astype(int)
-colors = plt.cm.tab10(np.linspace(0, 1, mtm_frames[0].shape[0]))
+def to_ase_trajectory(frames, stride=5):
+    return [
+        ase.Atoms("H8", positions=xyz, cell=np.eye(3) * 20.0, pbc=False)
+        for xyz in frames[::stride]
+    ]
 
-all_xy = np.concatenate(mtm_frames, axis=0)
-pad = 0.6
-xlim = (all_xy[:, 0].min() - pad, all_xy[:, 0].max() + pad)
-ylim = (all_xy[:, 1].min() - pad, all_xy[:, 1].max() + pad)
 
-fig, axes = plt.subplots(1, 6, figsize=(13, 2.4), sharex=True, sharey=True)
-for ax, idx in zip(axes, snapshot_idx):
-    xy = mtm_frames[idx]
-    ax.scatter(xy[:, 0], xy[:, 1], c=colors, s=90, edgecolors="k", linewidths=0.5, zorder=3)
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
-    ax.set_aspect("equal")
-    ax.set_title(f"t = {traces['metatomic'][idx]['t']:.1f}", fontsize=10)
-    ax.set_xticks([])
-    ax.set_yticks([])
-fig.suptitle("the 8-particle cluster over one NVE trajectory (metatomic force_type)")
-fig.tight_layout()
-fig.show()
+viewer_settings = {"bonds": False, "playbackDelay": 90}
+
+chemiscope.show(
+    to_ase_trajectory(frames_by_type["lj"]),
+    mode="structure",
+    settings={"structure": [viewer_settings]},
+)
+
+# %%
+#
+# ``metatomic``, same starting configuration:
+
+chemiscope.show(
+    to_ase_trajectory(frames_by_type["metatomic"]),
+    mode="structure",
+    settings={"structure": [viewer_settings]},
+)
 
 # %%
 #
