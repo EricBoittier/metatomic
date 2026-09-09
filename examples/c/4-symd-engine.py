@@ -4,8 +4,9 @@
 Case study: driving symd through the C API
 ===========================================
 
-The other C tutorials show how to build a system, attach a pair list, and run
-a model in isolation. This one closes the loop with a real, independent
+The other C tutorials show how to build a system, attach a pair list, and
+(most recently) define and run a model in isolation. This one closes the loop
+with a real, independent
 simulation engine: `symd <https://github.com/whitead/symd>`_, a small C
 molecular-dynamics code (its specialty is symmetry-constrained crystal MD,
 though nothing here uses that -- see below).
@@ -142,8 +143,9 @@ import numpy as np
 #
 # #. **The model returns its outputs.** A :py:class:`TensorMap`-shaped
 #    ``"energy"`` output, with a ``"positions"`` gradient block attached --
-#    the C API tutorials only cover the energy itself; driving a real engine
-#    needs the gradient filled in too, since that *is* the force.
+#    that gradient *is* the force, and driving a real engine needs it filled
+#    in. See :ref:`the previous tutorial <c-tutorial-add-model>` for how,
+#    including a finite-difference check that it's actually correct.
 #
 #    .. details:: Show how the gradient block is built, and how the engine reads it back
 #
