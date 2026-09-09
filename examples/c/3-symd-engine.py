@@ -366,5 +366,4 @@ fig.show()
 # mean is not drift and not a bug: symd's own ``lj()`` shifts the *force* to
 # zero smoothly at the cutoff, while this model only shifts the *energy* and
 # truncates the force there. Both are standard, legitimate LJ cutoff
-# conventions; they just are not bit-identical. See symd's own
-# ``NOTES-metatomic.md`` for the full writeup.
+# conventions; they just are not bit-identical.
