@@ -47,20 +47,34 @@ import numpy as np
 # The bridge, 12 points at a time
 # ---------------------------------
 #
-# .. code-block:: c
+# Every snippet below is quoted directly out of symd's real
+# ``src/metatomic_force.c`` (via ``literalinclude``, not retyped), so it
+# can't drift out of sync with what actually runs. Larger ones are
+# collapsed by default -- click to expand.
 #
-#     #include <metatomic.h>   /* mta_system_t, mta_model_t, mta_execute_model */
-#     #include "force.h"       /* symd's own force_t vtable */
-#     #include "nlist.h"       /* symd's own neighbor list */
+# .. literalinclude:: /_include/metatomic_force.c
+#    :language: c
+#    :lines: 30-39
+#    :caption: metatomic_force.c, top of file
+#
+# ``metatomic_force.h`` itself pulls in symd's own ``force.h`` (the
+# ``force_t`` vtable) and ``nlist.h`` (symd's neighbor list). Before the
+# 12 points: the physics the model actually computes, independently
+# derived rather than copied from symd's own ``lj()`` (so the two can be
+# cross-checked, see the results below):
+#
+# .. literalinclude:: /_include/metatomic_force.c
+#    :language: c
+#    :lines: 66-93
+#    :caption: mtm_lj_pair() -- shifted Lennard-Jones, energy and force
 #
 # #. **The engine loads an exported model.** symd doesn't load a file --
 #    it registers an in-process plugin and loads it by name, once, in
 #    ``build_metatomic()``:
 #
-#    .. code-block:: c
-#
-#        mta_register_plugin(plugin);
-#        mta_load_model("symd-lennard-jones", "{}", MTM_PLUGIN_NAME, &mp->model);
+#    .. literalinclude:: /_include/metatomic_force.c
+#       :language: c
+#       :lines: 783-800
 #
 # #. **The engine requests and gets the model's capabilities.**
 #    :c:func:`mta_execute_model` does this itself (calling ``mtm_lj_capabilities``)
@@ -71,21 +85,36 @@ import numpy as np
 # #. **The engine creates a list of System.** ``mta_system_create`` wraps
 #    symd's own position/cell/pbc arrays as DLPack views -- no copies:
 #
-#    .. code-block:: c
-#
-#        mta_system_create(
-#            "Angstrom", types_tensor, positions_tensor, cell_tensor, pbc_tensor, &system
-#        );
+#    .. literalinclude:: /_include/metatomic_force.c
+#       :language: c
+#       :lines: 613-615
 #
 # #. **The engine asks the model for the neighbor lists it needs.**
 #    Handled internally by :c:func:`mta_execute_model` (``mtm_lj_requested_pair_lists``
 #    reports the cutoff as a ``PairListOptions`` JSON string).
-# #. **The engine computes those neighbor lists and registers them.** symd's
-#    own cutoff filtering, then:
+# #. **The engine computes those neighbor lists and registers them.**
+#    symd's own cutoff filtering, then attaching the result:
 #
-#    .. code-block:: c
+#    .. literalinclude:: /_include/metatomic_force.c
+#       :language: c
+#       :lines: 670-673
 #
-#        mta_system_add_pairs(system, options, pair_block);
+#    .. details:: Show how symd's own neighbor list becomes a metatomic pair list
+#
+#       Collecting the pairs symd's cell/Verlet list already found, within the
+#       model's *true* cutoff (the list itself uses a slightly larger skin
+#       radius):
+#
+#       .. literalinclude:: /_include/metatomic_force.c
+#          :language: c
+#          :lines: 549-582
+#
+#       Then packaging them as a metatomic pair-list block (displacement
+#       vectors, plus the ``first_atom``/``second_atom`` sample labels):
+#
+#       .. literalinclude:: /_include/metatomic_force.c
+#          :language: c
+#          :lines: 633-668
 #
 # #. **The engine asks for any extra required input data.** ``mtm_lj_requested_inputs``
 #    returns ``[]`` -- this model needs nothing beyond positions.
@@ -95,21 +124,41 @@ import numpy as np
 #    equivalent is :c:func:`mta_execute_model` itself, which also does unit
 #    conversion and consistency checking on top of whatever the model computes:
 #
-#    .. code-block:: c
-#
-#        status = mta_execute_model(
-#            mp->model, systems, 1, NULL, requested_outputs, true, &output, 1
-#        );
+#    .. literalinclude:: /_include/metatomic_force.c
+#       :language: c
+#       :lines: 681-695
 #
 #    This only became available partway through this exercise
 #    (``metatomic-core@8b0d8975``); earlier revisions of this code called
 #    ``execute_inner`` directly, since ``mta_execute_model`` was not ready yet.
 # #. **The model runs.** ``mtm_lj_execute_inner`` -- called internally by
 #    :c:func:`mta_execute_model` through the ``execute_inner`` function pointer.
+#
+#    .. details:: Show the full mtm_lj_execute_inner()
+#
+#       .. literalinclude:: /_include/metatomic_force.c
+#          :language: c
+#          :lines: 358-486
+#
 # #. **The model returns its outputs.** A :py:class:`TensorMap`-shaped
 #    ``"energy"`` output, with a ``"positions"`` gradient block attached --
 #    the C API tutorials only cover the energy itself; driving a real engine
 #    needs the gradient filled in too, since that *is* the force.
+#
+#    .. details:: Show how the gradient block is built, and how the engine reads it back
+#
+#       Building it (one row per atom, values = ``-force``):
+#
+#       .. literalinclude:: /_include/metatomic_force.c
+#          :language: c
+#          :lines: 240-298
+#
+#       Reading it back out, on the engine side:
+#
+#       .. literalinclude:: /_include/metatomic_force.c
+#          :language: c
+#          :lines: 704-756
+#
 # #. **The engine runs backward() for gradients, if needed.** Not used here:
 #    the C API has no autodiff pass. Forces come back already computed, as
 #    the ``"positions"`` gradient block from point 11 -- exactly the
