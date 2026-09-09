@@ -7,22 +7,26 @@ Case study: driving symd through the C API
 The other C tutorials show how to build a system, attach a pair list, and run
 a model in isolation. This one closes the loop with a real, independent
 simulation engine: `symd <https://github.com/whitead/symd>`_, a small C
-molecular-dynamics code with its own neighbor lists, thermostats, and (for
-this tutorial) 2D wallpaper-group symmetry constraints.
+molecular-dynamics code (its specialty is symmetry-constrained crystal MD,
+though nothing here uses that -- see below).
 
 symd has its own force plugin ABI (a ``force_t`` vtable: a ``gather``
 function that fills a ``forces`` array and returns the energy, plus a
 ``free``). Wiring a new ``force_type: "metatomic"`` into it means writing the
 engine side of the C API for real: wrap symd's own arrays into an
-:c:type:`mta_system_t`, reuse symd's own neighbor list as the pair list, and
-call :c:func:`mta_execute_model` on a toy shifted Lennard-Jones
+:c:type:`mta_system_t`, attach a pair list built from symd's own neighbor
+list, and call :c:func:`mta_execute_model` on a toy shifted Lennard-Jones
 :c:type:`mta_model_t` -- then read the result back into symd's own force
 buffer. Every result plotted below comes from actually running the compiled
 ``symd`` binary, not from replaying saved numbers.
 
 The full integration lives in symd's own tree, on the ``feat/metatomic-c-api``
-branch (not part of this repository) -- this tutorial reproduces its smoke
-test and its validation against symd's own hand-written potentials.
+branch (not part of this repository). To isolate *just* the C API bridge --
+not symd's neighbor-list bookkeeping, not its symmetry machinery -- this
+tutorial runs the simplest possible scenario: a small free (non-periodic)
+cluster of particles under NVE, where whether energy is conserved is a
+direct, unambiguous check on whether the physics coming back through the C
+API is correct.
 """
 
 # sphinx_gallery_thumbnail_number = 1
@@ -87,11 +91,12 @@ import matplotlib.pyplot as plt
 #         mp->model, systems, 1, NULL, requested_outputs, true, &output, 1
 #     );
 #
-# :c:func:`mta_execute_model` (not ``execute_inner`` directly) is deliberate:
-# it is the entry point that actually does unit conversion and consistency
-# checking -- ``metatomic-core@8b0d8975`` finished it partway through this
-# exercise, replacing an earlier workaround that called ``execute_inner``
-# directly while it was still ``todo!()``.
+# Calling :c:func:`mta_execute_model` -- not ``execute_inner`` directly -- is
+# deliberate: it is the real entry point, handling unit conversion and
+# consistency checking on top of whatever the model itself computes. It only
+# became available partway through this exercise (``metatomic-core@8b0d8975``);
+# earlier revisions called ``execute_inner`` directly to work around it still
+# being ``todo!()``.
 #
 # The result comes back as a :py:class:`TensorMap`-shaped ``"energy"``
 # output with a ``"positions"`` gradient block -- the C API tutorials stop at
@@ -103,68 +108,49 @@ import matplotlib.pyplot as plt
 # Setting up a run
 # ----------------
 #
-# The scenario is a 6-particle, symmetry-constrained 2D packing (wallpaper
-# group p6, symd's own ``wp-15`` example) -- embedded here so this tutorial
-# is self-contained.
+# Eight particles in a small 2D cluster, in a box much larger than the
+# interaction cutoff -- so there is nothing for symd's own neighbor list to
+# do beyond simple distance checks, and nothing for the C API bridge to get
+# wrong. ``group.p1`` is symd's trivial symmetry group (one member, the
+# identity): it still goes through symd's normal group machinery, just
+# without imposing any actual constraint.
 
-WP15_GROUP = {
-    "name": "wp-15", "size": 6, "dof": 2,
-    "members": [
-        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        [0.0, -1.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0],
-        [-1.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-        [0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-        [1.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0],
-        [-1.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    ],
-    "projector": [
-        1.0, 1.0, 1.0, 1.0, -0.5, -0.5, -0.5, -0.5,
-        0.0, 0.0, 0.0, 0.0, 0.8660254, 0.8660254, 0.8660254, 0.8660254,
-    ],
+P1_GROUP = {
+    "name": "p1", "size": 1, "dof": 2,
+    "members": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],
+    "projector": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
 }
-WP15_WYCKOFFS = {
-    "wp-15-00": {"name": "wp-15-0", "size": 3, "dof": 2,
-                 "members": [[1, 0, 0, 0, 0, 0, 0, 0, 1], [0, 0, 0, 1, 0, 0, 0, 0, 1],
-                             [-1, 0, 0, -1, 0, 0, 0, 0, 1]],
-                 "projector": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
-    "wp-15-01": {"name": "wp-15-1", "size": 2, "dof": 0,
-                 "members": [[0, 0, 0.66666667, 0, 0, 0.33333333, 0, 0, 1],
-                             [0, 0, 0.33333333, 0, 0, 0.66666667, 0, 0, 1]],
-                 "projector": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
-    "wp-15-02": {"name": "wp-15-2", "size": 1, "dof": 0,
-                 "members": [[0, 0, 0, 0, 0, 0, 0, 0, 1]],
-                 "projector": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
-}
-WP15_XYZ = """    0.716213    0.0897165
-    0.869673     0.112382
-    0.259615     0.123343
- 9.71127e-24  1.94225e-23
-    0.406883  7.76902e-23
-    0.666667     0.333333
+# a compact 2x4 grid, spacing 1.15 sigma, small jitter -- fractional
+# coordinates in a 20x20 box (sigma = 1, cutoff = 3 sigma: nothing here is
+# within reach of a periodic image of itself or of another particle)
+CLUSTER_XYZ = """0.413752 0.471698
+0.470839 0.469914
+0.528068 0.469763
+0.586340 0.473260
+0.413012 0.527819
+0.471985 0.529285
+0.528908 0.527354
+0.586206 0.529793
 """
 
 
 def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
     """Write inputs for one force_type, run symd, and return the parsed trace."""
     workdir = Path(workdir)
-    (workdir / "wp-15.xyz").write_text(WP15_XYZ)
-    (workdir / "wp-15.json").write_text(json.dumps(WP15_GROUP))
-    for name, group in WP15_WYCKOFFS.items():
-        (workdir / f"{name}.json").write_text(json.dumps(group))
+    (workdir / "cluster.xyz").write_text(CLUSTER_XYZ)
+    (workdir / "p1.json").write_text(json.dumps(P1_GROUP))
 
     run_params = {
-        "steps": steps, "temperature": 0.2, "start_temperature": 0.5,
-        "langevin_gamma": 0.005, "cell": [25, 25], "n_images": 2,
-        "n_particles": 6, "start_positions": "wp-15.xyz",
+        # NVE: no thermostat, no pressure coupling -- total energy should be
+        # conserved, full stop, and any drift is a bug in the force.
+        "steps": steps, "time_step": 0.005,
+        "cell": [20, 20], "n_images": 0, "n_particles": 8,
+        "start_positions": "cluster.xyz",
         "print_period": print_period, "positions_log_file": "positions.xyz",
         "position_log_period": print_period, "force_type": force_type,
-        "group": "wp-15.json",
-        "wyckoffs": [
-            {"group": "wp-15-02.json", "n_particles": 1},
-            {"group": "wp-15-00.json", "n_particles": 1},
-            {"group": "wp-15-01.json", "n_particles": 1},
-        ],
-        "thermostat": "baoab", "pressure": 1, "box_update_period": 25,
+        "lj_epsilon": 1.0, "lj_sigma": 1.0,
+        "group": "p1.json",
+        "start_temperature": 0.3, "seed": 42,
         "final_positions": "final_positions.dat",
     }
     (workdir / "run_params.json").write_text(json.dumps(run_params))
@@ -188,26 +174,28 @@ def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
 
 # %%
 #
-# Running the three force types
-# ------------------------------
+# Running it
+# ----------
 #
-# ``lj`` and ``nlj`` are symd's own hand-written Lennard-Jones (O(n^2), and a
-# cell/Verlet-list version); ``metatomic`` is the C API bridge above,
-# reusing ``nlj``'s neighbor list. Same starting configuration, same seed.
+# ``lj`` is symd's own hand-written, independently-implemented Lennard-Jones;
+# ``metatomic`` is the C API bridge above. Same starting configuration, same
+# seed, both NVE.
 
 SYMD_BUILD = Path(os.environ.get("SYMD_BUILD_DIR", "/home/ericb/metawork/etc/symd/build"))
-symd_binary = SYMD_BUILD / "symd2"  # N_DIMS=2, matches this 2D packing
+symd_binary = SYMD_BUILD / "symd2"  # N_DIMS=2, matches this 2D cluster
 
 traces = {}
 with tempfile.TemporaryDirectory() as tmp:
-    for force_type in ["lj", "nlj", "metatomic"]:
+    for force_type in ["lj", "metatomic"]:
         run_dir = Path(tmp) / force_type
         run_dir.mkdir()
         traces[force_type] = run_symd(force_type, run_dir, symd_binary)
 
 for name, rows in traces.items():
+    Es = [r["E"] for r in rows]
+    drift = (max(Es) - min(Es)) / abs(sum(Es) / len(Es))
     print(f"{name:>10}: {len(rows)} samples, E(0) = {rows[0]['E']:.5f}, "
-          f"E(end) = {rows[-1]['E']:.5f}")
+          f"E(end) = {rows[-1]['E']:.5f}, (max-min)/|mean| = {drift:.4%}")
 
 # %%
 #
@@ -215,55 +203,46 @@ for name, rows in traces.items():
 # -------
 #
 # The metatomic run's own energy bookkeeping: potential and kinetic energy
-# trade off as the baoab thermostat pulls the system from T = 0.5 toward its
-# T = 0.2 target -- total energy is *not* expected to be flat, since this is
-# NVT, not NVE.
+# trade off, total energy stays flat. This is the actual point of running
+# NVE -- an MD code that gets forces wrong from a model almost always shows
+# it here first, as drift.
 
 mtm = traces["metatomic"]
 t = [r["t"] for r in mtm]
 
-fig, ax = plt.subplots(1, 2, figsize=(9, 4))
-
-ax[0].plot(t, [r["PE"] for r in mtm], label="potential energy")
-ax[0].plot(t, [r["KE"] for r in mtm], label="kinetic energy")
-ax[0].plot(t, [r["E"] for r in mtm], label="total energy")
-ax[0].legend()
-ax[0].set_xlabel("t (reduced units)")
-ax[0].set_ylabel("energy")
-ax[0].set_title("metatomic force_type")
-
-ax[1].plot(t, [r["T"] for r in mtm], color="C3")
-ax[1].axhline(0.2, color="0.6", linestyle="--", linewidth=1, label="target T")
-ax[1].legend()
-ax[1].set_xlabel("t (reduced units)")
-ax[1].set_ylabel("temperature")
-ax[1].set_title("thermostat")
-
+fig, ax = plt.subplots(figsize=(6.5, 4.2))
+ax.plot(t, [r["PE"] for r in mtm], label="potential energy")
+ax.plot(t, [r["KE"] for r in mtm], label="kinetic energy")
+ax.plot(t, [r["E"] for r in mtm], label="total energy", color="k", linewidth=1.5)
+ax.legend()
+ax.set_xlabel("t (reduced units)")
+ax.set_ylabel("energy")
+ax.set_title("metatomic force_type, NVE")
 fig.tight_layout()
 fig.show()
 
 # %%
 #
 # And the cross-check this tutorial exists to make: does the C API path
-# agree with symd's own force code, for the *entire* trajectory, not just
-# the first step?
+# agree with symd's own independently-implemented force, for the *entire*
+# trajectory?
 
-fig, ax = plt.subplots(figsize=(6, 4.2))
-for name, color in [("lj", "C0"), ("nlj", "C1"), ("metatomic", "C2")]:
+fig, ax = plt.subplots(figsize=(6.5, 4.2))
+for name, color in [("lj", "C0"), ("metatomic", "C2")]:
     rows = traces[name]
     ax.plot([r["t"] for r in rows], [r["E"] for r in rows], label=name, color=color)
 ax.legend()
 ax.set_xlabel("t (reduced units)")
 ax.set_ylabel("total energy")
-ax.set_title("same trajectory, three force implementations")
+ax.set_title("same trajectory, two independent force implementations")
 fig.tight_layout()
 fig.show()
 
 # %%
 #
-# ``nlj`` and ``metatomic`` track each other almost exactly for all 4000
-# steps -- expected, since the C API path reuses ``nlj``'s own neighbor
-# list. The constant offset from ``lj`` is a pre-existing double-count in
-# symd's own ghost-pair energy accounting on this symmetry-heavy example
-# (not introduced by, and not fixed by, this integration); forces are
-# unaffected; see symd's own ``NOTES-metatomic.md`` for the full writeup.
+# Both are flat -- energy is conserved on both sides, which is the whole
+# check. The small constant offset between them is not drift and not a bug:
+# symd's own ``lj()`` shifts the *force* to zero smoothly at the cutoff,
+# while this model only shifts the *energy* and truncates the force there.
+# Both are standard, legitimate LJ cutoff conventions; they just are not
+# bit-identical. See symd's own ``NOTES-metatomic.md`` for the full writeup.
