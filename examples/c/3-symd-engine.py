@@ -13,23 +13,22 @@ though nothing here uses that -- see below).
 symd has its own force plugin ABI (a ``force_t`` vtable: a ``gather``
 function that fills a ``forces`` array and returns the energy, plus a
 ``free``). Wiring a new ``force_type: "metatomic"`` into it means writing the
-engine side of the C API for real: wrap symd's own arrays into an
-:c:type:`mta_system_t`, attach a pair list built from symd's own neighbor
-list, and call :c:func:`mta_execute_model` on a toy shifted Lennard-Jones
-:c:type:`mta_model_t` -- then read the result back into symd's own force
-buffer. Every result plotted below comes from actually running the compiled
-``symd`` binary, not from replaying saved numbers.
+engine side of the C API for real. The walkthrough below follows the same
+12-step data flow as the :ref:`torch engine/model diagram <model-dataflow>`
+on the overview page, point by point, so it should read as "the same
+contract, a different language" rather than a separate story.
 
 The full integration lives in symd's own tree, on the ``feat/metatomic-c-api``
-branch (not part of this repository). To isolate *just* the C API bridge --
-not symd's neighbor-list bookkeeping, not its symmetry machinery -- this
-tutorial runs the simplest possible scenario: a small free (non-periodic)
-cluster of particles under NVE, where whether energy is conserved is a
-direct, unambiguous check on whether the physics coming back through the C
-API is correct.
+branch (not part of this repository). Every result plotted below comes from
+actually running the compiled ``symd`` binary, not from replaying saved
+numbers. To isolate *just* the C API bridge -- not symd's neighbor-list
+bookkeeping, not its symmetry machinery -- it runs the simplest possible
+scenario: a small free (non-periodic) cluster of particles under NVE, where
+whether energy is conserved is a direct, unambiguous check on whether the
+physics coming back through the C API is correct.
 """
 
-# sphinx_gallery_thumbnail_number = 1
+# sphinx_gallery_thumbnail_number = 2
 
 import json
 import os
@@ -39,69 +38,82 @@ import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 # %%
 #
-# The bridge, in two snippets
-# ----------------------------
-#
-# The model is a shifted Lennard-Jones potential, independently derived (not
-# copied from symd's own ``lj()`` helper) so the two can be cross-checked:
+# The bridge, 12 points at a time
+# ---------------------------------
 #
 # .. code-block:: c
 #
-#     static void mtm_lj_pair(
-#         double dx, double dy, double dz,
-#         const MtmLennardJones *lj,
-#         double *energy,
-#         double force_on_i[3]
-#     ) {
-#         double r2 = dx * dx + dy * dy + dz * dz;
-#         if (r2 <= 0.0 || r2 >= lj->cutoff * lj->cutoff) {
-#             *energy = 0.0;
-#             force_on_i[0] = force_on_i[1] = force_on_i[2] = 0.0;
-#             return;
-#         }
-#         double inv2 = (lj->sigma * lj->sigma) / r2;
-#         double inv6 = inv2 * inv2 * inv2;
-#         double inv12 = inv6 * inv6;
-#         *energy = 4.0 * lj->epsilon * (inv12 - inv6) - lj->shift;
+#     #include <metatomic.h>   /* mta_system_t, mta_model_t, mta_execute_model */
+#     #include "force.h"       /* symd's own force_t vtable */
+#     #include "nlist.h"       /* symd's own neighbor list */
 #
-#         /* dE/d(r^2) = (12 * epsilon / r^2) * (inv6 - 2 * inv12) */
-#         double dedr2 = (12.0 * lj->epsilon / r2) * (inv6 - 2.0 * inv12);
-#         force_on_i[0] = 2.0 * dedr2 * dx;
-#         force_on_i[1] = 2.0 * dedr2 * dy;
-#         force_on_i[2] = 2.0 * dedr2 * dz;
-#     }
+# #. **The engine loads an exported model.** symd doesn't load a file --
+#    it registers an in-process plugin and loads it by name, once, in
+#    ``build_metatomic()``:
 #
-# ``metatomic_gather_forces`` (symd's ``force_t.gather``) wraps symd's
-# positions into an :c:type:`mta_system_t`, attaches a pair list built from
-# symd's own neighbor list, and calls :c:func:`mta_execute_model`:
+#    .. code-block:: c
 #
-# .. code-block:: c
+#        mta_register_plugin(plugin);
+#        mta_load_model("symd-lennard-jones", "{}", MTM_PLUGIN_NAME, &mp->model);
 #
-#     static const char *requested_outputs = "[{"
-#         "\"type\": \"metatomic_quantity\","
-#         "\"name\": \"energy\","
-#         "\"unit\": \"eV\","
-#         "\"gradients\": [\"positions\"],"
-#         "\"sample_kind\": \"system\""
-#         "}]";
-#     status = mta_execute_model(
-#         mp->model, systems, 1, NULL, requested_outputs, true, &output, 1
-#     );
+# #. **The engine requests and gets the model's capabilities.**
+#    :c:func:`mta_execute_model` does this itself (calling ``mtm_lj_capabilities``)
+#    as part of consistency checking -- symd's own code never calls it directly.
+# #. **The engine creates evaluation options.** The C API has no separate
+#    options object; the equivalent is just the ``requested_outputs_json``
+#    string handed straight to :c:func:`mta_execute_model` (point 9).
+# #. **The engine creates a list of System.** ``mta_system_create`` wraps
+#    symd's own position/cell/pbc arrays as DLPack views -- no copies:
 #
-# Calling :c:func:`mta_execute_model` -- not ``execute_inner`` directly -- is
-# deliberate: it is the real entry point, handling unit conversion and
-# consistency checking on top of whatever the model itself computes. It only
-# became available partway through this exercise (``metatomic-core@8b0d8975``);
-# earlier revisions called ``execute_inner`` directly to work around it still
-# being ``todo!()``.
+#    .. code-block:: c
 #
-# The result comes back as a :py:class:`TensorMap`-shaped ``"energy"``
-# output with a ``"positions"`` gradient block -- the C API tutorials stop at
-# energy-only ("position gradients are still TODO"); driving a real engine
-# needs the gradient filled in, since that *is* the force.
+#        mta_system_create(
+#            "Angstrom", types_tensor, positions_tensor, cell_tensor, pbc_tensor, &system
+#        );
+#
+# #. **The engine asks the model for the neighbor lists it needs.**
+#    Handled internally by :c:func:`mta_execute_model` (``mtm_lj_requested_pair_lists``
+#    reports the cutoff as a ``PairListOptions`` JSON string).
+# #. **The engine computes those neighbor lists and registers them.** symd's
+#    own cutoff filtering, then:
+#
+#    .. code-block:: c
+#
+#        mta_system_add_pairs(system, options, pair_block);
+#
+# #. **The engine asks for any extra required input data.** ``mtm_lj_requested_inputs``
+#    returns ``[]`` -- this model needs nothing beyond positions.
+# #. **The engine registers that extra data.** Nothing to do, since point 7
+#    asked for nothing.
+# #. **The engine calls the model.** Not ``forward()`` -- the C API's
+#    equivalent is :c:func:`mta_execute_model` itself, which also does unit
+#    conversion and consistency checking on top of whatever the model computes:
+#
+#    .. code-block:: c
+#
+#        status = mta_execute_model(
+#            mp->model, systems, 1, NULL, requested_outputs, true, &output, 1
+#        );
+#
+#    This only became available partway through this exercise
+#    (``metatomic-core@8b0d8975``); earlier revisions called ``execute_inner``
+#    directly to work around it still being ``todo!()``.
+# #. **The model runs.** ``mtm_lj_execute_inner`` -- called internally by
+#    :c:func:`mta_execute_model` through the ``execute_inner`` function pointer.
+# #. **The model returns its outputs.** A :py:class:`TensorMap`-shaped
+#    ``"energy"`` output, with a ``"positions"`` gradient block attached --
+#    the C API tutorials stop at energy-only ("position gradients are still
+#    TODO"); driving a real engine needs the gradient filled in, since that
+#    *is* the force.
+# #. **The engine runs backward() for gradients, if needed.** Not used here:
+#    the C API has no autodiff pass. Forces come back already computed, as
+#    the ``"positions"`` gradient block from point 11 -- exactly the
+#    *explicit* gradients path the torch docs' own tip on this step mentions
+#    as the alternative to backward-mode differentiation.
 
 # %%
 #
@@ -111,9 +123,9 @@ import matplotlib.pyplot as plt
 # Eight particles in a small 2D cluster, in a box much larger than the
 # interaction cutoff -- so there is nothing for symd's own neighbor list to
 # do beyond simple distance checks, and nothing for the C API bridge to get
-# wrong. ``group.p1`` is symd's trivial symmetry group (one member, the
-# identity): it still goes through symd's normal group machinery, just
-# without imposing any actual constraint.
+# wrong. ``p1`` is symd's trivial symmetry group (one member, the identity):
+# it still goes through symd's normal group machinery, just without imposing
+# any actual constraint.
 
 P1_GROUP = {
     "name": "p1", "size": 1, "dof": 2,
@@ -135,7 +147,7 @@ CLUSTER_XYZ = """0.413752 0.471698
 
 
 def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
-    """Write inputs for one force_type, run symd, and return the parsed trace."""
+    """Write inputs for one force_type, run symd, and return (trace, frames)."""
     workdir = Path(workdir)
     (workdir / "cluster.xyz").write_text(CLUSTER_XYZ)
     (workdir / "p1.json").write_text(json.dumps(P1_GROUP))
@@ -169,7 +181,22 @@ def run_symd(force_type, workdir, symd_binary, steps=4000, print_period=10):
                 {"t": float(t), "T": float(T), "PE": float(PE),
                  "KE": float(KE), "E": float(E)}
             )
-    return rows
+
+    # parse the logged xyz trajectory: "n\nFrame: k\nH x y z\n..." repeated
+    frames = []
+    xyz_lines = (workdir / "positions.xyz").read_text().splitlines()
+    i = 0
+    while i < len(xyz_lines):
+        n_atoms = int(xyz_lines[i])
+        i += 2  # atom count, then the "Frame: k" comment line
+        coords = []
+        for _ in range(n_atoms):
+            parts = xyz_lines[i].split()
+            coords.append((float(parts[1]), float(parts[2])))
+            i += 1
+        frames.append(np.array(coords))
+
+    return rows, frames
 
 
 # %%
@@ -185,17 +212,50 @@ SYMD_BUILD = Path(os.environ.get("SYMD_BUILD_DIR", "/home/ericb/metawork/etc/sym
 symd_binary = SYMD_BUILD / "symd2"  # N_DIMS=2, matches this 2D cluster
 
 traces = {}
+frames_by_type = {}
 with tempfile.TemporaryDirectory() as tmp:
     for force_type in ["lj", "metatomic"]:
         run_dir = Path(tmp) / force_type
         run_dir.mkdir()
-        traces[force_type] = run_symd(force_type, run_dir, symd_binary)
+        traces[force_type], frames_by_type[force_type] = run_symd(force_type, run_dir, symd_binary)
 
 for name, rows in traces.items():
     Es = [r["E"] for r in rows]
     drift = (max(Es) - min(Es)) / abs(sum(Es) / len(Es))
     print(f"{name:>10}: {len(rows)} samples, E(0) = {rows[0]['E']:.5f}, "
           f"E(end) = {rows[-1]['E']:.5f}, (max-min)/|mean| = {drift:.4%}")
+
+# %%
+#
+# The cluster, in motion
+# -----------------------
+#
+# The actual 2D system, straight from symd's own trajectory log, at six
+# points across the run -- each particle keeps its color across panels so
+# you can follow it.
+
+mtm_frames = frames_by_type["metatomic"]
+snapshot_idx = np.linspace(0, len(mtm_frames) - 1, 6).astype(int)
+colors = plt.cm.tab10(np.linspace(0, 1, mtm_frames[0].shape[0]))
+
+all_xy = np.concatenate(mtm_frames, axis=0)
+pad = 0.6
+xlim = (all_xy[:, 0].min() - pad, all_xy[:, 0].max() + pad)
+ylim = (all_xy[:, 1].min() - pad, all_xy[:, 1].max() + pad)
+
+fig, axes = plt.subplots(1, 6, figsize=(13, 2.4), sharex=True, sharey=True)
+for ax, idx in zip(axes, snapshot_idx):
+    xy = mtm_frames[idx]
+    ax.scatter(xy[:, 0], xy[:, 1], c=colors, s=90, edgecolors="k", linewidths=0.5, zorder=3)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect("equal")
+    ax.set_title(f"t = {traces['metatomic'][idx]['t']:.1f}", fontsize=10)
+    ax.set_xticks([])
+    ax.set_yticks([])
+fig.suptitle("the 8-particle cluster over one NVE trajectory (metatomic force_type)")
+fig.tight_layout()
+fig.show()
 
 # %%
 #
@@ -225,24 +285,30 @@ fig.show()
 #
 # And the cross-check this tutorial exists to make: does the C API path
 # agree with symd's own independently-implemented force, for the *entire*
-# trajectory?
+# trajectory? Both total-energy traces are shown as their deviation from
+# their own mean, ``E(t) - <E>`` -- this removes the (well-understood, see
+# below) constant offset between them and puts both conservation qualities
+# on the same scale.
 
 fig, ax = plt.subplots(figsize=(6.5, 4.2))
 for name, color in [("lj", "C0"), ("metatomic", "C2")]:
     rows = traces[name]
-    ax.plot([r["t"] for r in rows], [r["E"] for r in rows], label=name, color=color)
+    Es = np.array([r["E"] for r in rows])
+    ax.plot([r["t"] for r in rows], Es - Es.mean(), label=name, color=color)
+ax.axhline(0, color="0.7", linewidth=1, zorder=0)
 ax.legend()
 ax.set_xlabel("t (reduced units)")
-ax.set_ylabel("total energy")
+ax.set_ylabel("total energy - <total energy>")
 ax.set_title("same trajectory, two independent force implementations")
 fig.tight_layout()
 fig.show()
 
 # %%
 #
-# Both are flat -- energy is conserved on both sides, which is the whole
-# check. The small constant offset between them is not drift and not a bug:
-# symd's own ``lj()`` shifts the *force* to zero smoothly at the cutoff,
-# while this model only shifts the *energy* and truncates the force there.
-# Both are standard, legitimate LJ cutoff conventions; they just are not
-# bit-identical. See symd's own ``NOTES-metatomic.md`` for the full writeup.
+# Both fluctuate around zero -- energy is conserved on both sides, which is
+# the whole check. The offset removed by centering each trace on its own
+# mean is not drift and not a bug: symd's own ``lj()`` shifts the *force* to
+# zero smoothly at the cutoff, while this model only shifts the *energy* and
+# truncates the force there. Both are standard, legitimate LJ cutoff
+# conventions; they just are not bit-identical. See symd's own
+# ``NOTES-metatomic.md`` for the full writeup.
