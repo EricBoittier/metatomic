@@ -320,7 +320,7 @@ if __name__ == "__main__":
     install_requires = [
         f"torch {torch_version}",
         "metatensor-torch >=0.10.0.dev0,<0.11",
-        "metatensor-operations >=0.5.0.dev0,<0.6",
+        "metatensor-operations >=0.5.0,<0.7",
         "wigners >=0.4.0",
     ]
 
