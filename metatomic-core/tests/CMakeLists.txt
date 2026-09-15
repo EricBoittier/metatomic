@@ -55,6 +55,9 @@ endif()
 
 enable_testing()
 add_subdirectory(test-plugins)
+if(NOT TARGET lj-plugin)
+    add_subdirectory(lj-plugin)
+endif()
 
 if (TARGET metatensor::shared)
     get_target_property(METATENSOR_LOCATION metatensor::shared IMPORTED_LOCATION)
@@ -80,7 +83,10 @@ function(metatomic_add_test source target)
         NO_SYSTEM_FROM_IMPORTED ON
     )
 
-    target_compile_definitions(${target} PRIVATE PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>")
+    target_compile_definitions(${target} PRIVATE
+        PLUGIN_DIR="$<TARGET_FILE_DIR:test-c-plugin>"
+        LJ_PLUGIN_PATH="$<TARGET_FILE:lj-plugin>"
+    )
 
     add_test(
         NAME ${target}

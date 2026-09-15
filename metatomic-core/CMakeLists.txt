@@ -413,6 +413,17 @@ else()
     add_library(metatomic ALIAS metatomic::static)
 endif()
 
+# Shifted Lennard-Jones plugin used by engine tests (LAMMPS, i-PI, ASE, …).
+# Off by default for a plain CMake install; the Python package turns it on so
+# ``metatomic.utils.lj_plugin_path()`` can return a shipped shared library.
+option(METATOMIC_BUILD_LJ_PLUGIN
+    "Build and install the shifted Lennard-Jones plugin used in engine tests"
+    OFF
+)
+if(METATOMIC_BUILD_LJ_PLUGIN)
+    add_subdirectory(tests/lj-plugin)
+endif()
+
 #------------------------------------------------------------------------------#
 # Installation configuration
 #------------------------------------------------------------------------------#

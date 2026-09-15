@@ -13,3 +13,9 @@ def test_library_loading():
 
     lib = mta._c_lib._get_library()
     assert lib.mta_version().decode("utf8").replace("-", ".") == mta.__version__
+
+
+def test_lj_plugin_path():
+    path = mta.utils.lj_plugin_path()
+    assert os.path.isfile(path)
+    assert os.path.basename(path) == "lj-plugin.so"

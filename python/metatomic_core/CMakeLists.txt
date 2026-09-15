@@ -42,7 +42,14 @@ if(${METATOMIC_CORE_PYTHON_USE_EXTERNAL_LIB})
         "EXTERNAL_METATOMIC_PREFIX = \"${METATOMIC_PREFIX}\"\n"
     )
 
-    install(CODE "message(STATUS \"nothing to install\")")
+    if ("${METATOMIC_CORE_SOURCE_DIR}" STREQUAL "")
+        message(FATAL_ERROR
+            "METATOMIC_CORE_SOURCE_DIR is required to build the Lennard-Jones "
+            "test plugin against an external metatomic-core library"
+        )
+    endif()
+    enable_language(C)
+    add_subdirectory("${METATOMIC_CORE_SOURCE_DIR}/tests/lj-plugin" lj-plugin)
 else()
     if ("${METATOMIC_CORE_SOURCE_DIR}" STREQUAL "")
         message(FATAL_ERROR
@@ -55,6 +62,7 @@ else()
 
     set(BUILD_SHARED_LIBS ON)
     set(METATOMIC_INSTALL_BOTH_STATIC_SHARED OFF)
+    set(METATOMIC_BUILD_LJ_PLUGIN ON)
     # strip dynamic library for smaller wheels to download/install
     set(EXTRA_RUST_FLAGS "-Cstrip=symbols")
 
