@@ -16,3 +16,8 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 
 #### Removed
 -->
+
+### Added
+
+- Added the Python `metatomic.System` class, including access to system data,
+  pair lists, custom data, and the underlying C API pointer.

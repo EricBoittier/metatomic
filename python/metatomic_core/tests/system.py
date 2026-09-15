@@ -280,22 +280,30 @@ def test_system_data():
 
     types = np.asarray(system.types)
     assert types.shape == (4,)
+    assert not types.flags.writeable
     assert types[0] == 1
     assert types[3] == 10
 
     positions = np.asarray(system.positions)
     assert positions.shape == (4, 3)
+    assert not positions.flags.writeable
     assert positions[0, 0] == 1.0
     assert positions[3, 0] == 10.0
 
     cell = np.asarray(system.cell)
     assert cell.shape == (3, 3)
+    assert not cell.flags.writeable
 
     pbc = np.asarray(system.pbc)
     assert pbc.shape == (3,)
+    assert not pbc.flags.writeable
     assert bool(pbc[0]) is True
     assert bool(pbc[1]) is False
     assert bool(pbc[2]) is True
+
+    # DLPack views keep the backing system storage alive.
+    del system
+    assert positions[3, 0] == 10.0
 
 
 def test_system_pairs():
@@ -356,6 +364,10 @@ def test_system_ownership():
 
     view = System.unsafe_view_from_ptr(raw)
     assert view.size == 4
+
+    with pytest.raises(ValueError, match="view of a system owned elsewhere"):
+        view.release()
+
     del view
     assert system.size == 4
 
@@ -365,3 +377,4 @@ def test_system_ownership():
 
     with pytest.raises(ValueError, match="released"):
         system.size
+    assert repr(system) == "System(<released>)"
