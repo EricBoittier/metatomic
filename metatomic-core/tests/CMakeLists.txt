@@ -55,9 +55,6 @@ endif()
 
 enable_testing()
 add_subdirectory(test-plugins)
-if(NOT TARGET lj-plugin)
-    add_subdirectory(lj-plugin)
-endif()
 
 if (TARGET metatensor::shared)
     get_target_property(METATENSOR_LOCATION metatensor::shared IMPORTED_LOCATION)
