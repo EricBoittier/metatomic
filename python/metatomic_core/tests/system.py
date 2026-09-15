@@ -1,10 +1,13 @@
 import copy
+import json
 import math
 import operator
 
+import numpy as np
 import pytest
+from metatensor import Labels, TensorBlock, TensorMap
 
-from metatomic import PairListOptions
+from metatomic import MetatomicError, PairListOptions, System
 
 
 ### ================================================================================ ###
@@ -208,3 +211,157 @@ def test_pair_options_from_dict_errors(pair_options):
     for data, message in cases:
         with pytest.raises(ValueError, match=message):
             PairListOptions.from_dict(data)
+
+
+### ================================================================================ ###
+###                                      System                                      ###
+### ================================================================================ ###
+
+
+def _test_system(n_atoms=4, positions_dtype=np.float64):
+    types = np.array([i * 3 + 1 for i in range(n_atoms)], dtype=np.int32)
+    positions = np.zeros((n_atoms, 3), dtype=positions_dtype)
+    for i in range(n_atoms):
+        positions[i] = (i * 3 + 1, i * 3 + 2, i * 3 + 3)
+    cell = np.array(
+        [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
+        dtype=positions_dtype,
+    )
+    pbc = np.array([True, False, True])
+    return System("nm", types, positions, cell, pbc)
+
+
+def _pair_block():
+    return TensorBlock(
+        values=np.array([[[1.5], [2.5], [3.5]]], dtype=np.float64),
+        samples=Labels(
+            [
+                "first_atom",
+                "second_atom",
+                "cell_shift_a",
+                "cell_shift_b",
+                "cell_shift_c",
+            ],
+            np.array([[0, 1, 0, 0, 0]], dtype=np.int32),
+        ),
+        components=[Labels("xyz", np.array([[0], [1], [2]], dtype=np.int32))],
+        properties=Labels("distance", np.array([[0]], dtype=np.int32)),
+    )
+
+
+def _custom_data():
+    block = TensorBlock(
+        values=np.array([[42.0]], dtype=np.float64),
+        samples=Labels("sample", np.array([[0]], dtype=np.int32)),
+        components=[],
+        properties=Labels("property", np.array([[0]], dtype=np.int32)),
+    )
+    return TensorMap(Labels("key", np.array([[0]], dtype=np.int32)), [block])
+
+
+def test_system_basics():
+    system = _test_system(4)
+    assert system.size == 4
+    assert len(system) == 4
+    assert system.length_unit == "nm"
+
+
+def test_system_construction_errors():
+    types = np.array([1, 2, 3], dtype=np.float32)
+    positions = np.zeros((3, 3), dtype=np.float32)
+    cell = np.eye(3, dtype=np.float32)
+    pbc = np.array([True, True, True])
+    with pytest.raises(MetatomicError, match="types"):
+        System("Angstrom", types, positions, cell, pbc)
+
+
+def test_system_data():
+    system = _test_system(4)
+
+    types = np.asarray(system.types)
+    assert types.shape == (4,)
+    assert types[0] == 1
+    assert types[3] == 10
+
+    positions = np.asarray(system.positions)
+    assert positions.shape == (4, 3)
+    assert positions[0, 0] == 1.0
+    assert positions[3, 0] == 10.0
+
+    cell = np.asarray(system.cell)
+    assert cell.shape == (3, 3)
+
+    pbc = np.asarray(system.pbc)
+    assert pbc.shape == (3,)
+    assert bool(pbc[0]) is True
+    assert bool(pbc[1]) is False
+    assert bool(pbc[2]) is True
+
+
+def test_system_pairs():
+    system = _test_system(4)
+    options = PairListOptions(
+        cutoff=1.0, full_list=True, strict=False, requestors=["test"]
+    )
+    system.add_pairs(options, _pair_block())
+
+    options_json = json.dumps(
+        {
+            "type": "metatomic_pair_list_options",
+            "cutoff": "0x40364ccccccccccd",
+            "full_list": False,
+            "strict": True,
+            "requestors": [""],
+        }
+    )
+    system.add_pairs(options_json, _pair_block())
+
+    pairs = system.pairs(options)
+    assert len(pairs.samples) == 1
+    assert len(pairs.properties) == 1
+
+    known = system.known_pairs()
+    assert len(known) == 2
+    assert known[0].cutoff == 1.0
+    assert known[0].full_list is True
+    assert known[0].strict is False
+    assert known[0].requestors == ["test"]
+
+
+def test_system_missing_pairs_is_an_error():
+    system = _test_system(2)
+    missing = PairListOptions(cutoff=9.0, full_list=False)
+    with pytest.raises(MetatomicError):
+        system.pairs(missing)
+
+
+def test_system_custom_data():
+    system = _test_system(4)
+    system.add_custom_data("test::my_data", _custom_data())
+
+    data = system.custom_data("test::my_data")
+    assert len(data.keys) == 1
+
+    with pytest.raises(MetatomicError):
+        system.custom_data("test::no_such_data")
+
+    system.add_custom_data("test::other_data", _custom_data())
+    names = sorted(system.known_custom_data())
+    assert names == ["test::my_data", "test::other_data"]
+
+
+def test_system_ownership():
+    system = _test_system(4)
+    raw = system.as_mta_system_t()
+
+    view = System.unsafe_view_from_ptr(raw)
+    assert view.size == 4
+    del view
+    assert system.size == 4
+
+    raw = system.release()
+    owned = System.unsafe_from_ptr(raw)
+    assert owned.size == 4
+
+    with pytest.raises(ValueError, match="released"):
+        system.size

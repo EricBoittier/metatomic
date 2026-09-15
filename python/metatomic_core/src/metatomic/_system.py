@@ -4,9 +4,22 @@ import math
 import re
 import struct
 from collections.abc import Sequence
-from typing import Optional
+from typing import Optional, Union
 
-from ._c_api import mta_string_t
+import numpy as np
+from ctypes_dlpack import DLManagedTensorVersioned, DLPackArray, array_as_dlpack
+from metatensor import TensorBlock, TensorMap
+
+from ._c_api import (
+    c_uintptr_t,
+    mta_string_t,
+    mta_system_data_kind,
+    mta_system_t,
+    mts_block_t,
+    mts_tensormap_t,
+)
+from ._c_lib import _get_library
+from ._status import check_pointer
 
 
 _HEX_NUMBER = re.compile(r"(0[xX])?[0-9a-fA-F]+")
@@ -311,3 +324,266 @@ class PairListOptions:
 
     def __hash__(self) -> int:
         return hash(self._comparison_key())
+
+
+def _as_dlpack(array) -> ctypes.POINTER(DLManagedTensorVersioned):
+    """Convert a numpy array to a DLPack pointer. The array must outlive the call."""
+    return array_as_dlpack(np.ascontiguousarray(array))
+
+
+def _from_dlpack(tensor) -> np.ndarray:
+    """Take a borrowed DLPack tensor from the C API and wrap it as numpy."""
+    return np.from_dlpack(DLPackArray(tensor))
+
+
+def _string_from_mta(printed) -> str:
+    lib = _get_library()
+    try:
+        return lib.mta_string_view(printed).decode("utf8")
+    finally:
+        lib.mta_string_free(printed)
+
+
+class System:
+    """
+    An atomistic system used as input to metatomic models.
+
+    This is a RAII wrapper around the ``mta_system_t`` type from the C API. It
+    can either own the underlying system (in which case it is freed with the
+    :py:class:`System`), or be a non-owning view into a system owned elsewhere
+    (for example a system passed to a model by the runtime).
+
+    All C API errors are raised as :py:class:`metatomic.MetatomicError`.
+    """
+
+    def __init__(self, length_unit, types, positions, cell, pbc):
+        """
+        Create a new :py:class:`System` from numpy arrays.
+
+        Ownership of the four arrays is transferred to the new system through
+        DLPack. The arrays must already have the dtype and layout expected by
+        :c:func:`mta_system_create`.
+
+        :param length_unit: unit of length used by ``positions`` and ``cell``
+        :param types: array with shape ``(n_atoms,)`` of atomic types (``int32``)
+        :param positions: array with shape ``(n_atoms, 3)`` of atomic positions
+        :param cell: array with shape ``(3, 3)`` of unit cell vectors
+        :param pbc: array with shape ``(3,)`` of periodic boundary conditions
+        """
+        self._lib = _get_library()
+        self._is_view = False
+
+        ptr = ctypes.POINTER(mta_system_t)()
+        self._lib.mta_system_create(
+            str(length_unit).encode("utf8"),
+            _as_dlpack(types),
+            _as_dlpack(positions),
+            _as_dlpack(cell),
+            _as_dlpack(pbc),
+            ctypes.byref(ptr),
+        )
+        check_pointer(ptr)
+        self._ptr = ptr
+
+    def _check_ptr(self):
+        if not self._ptr:
+            raise ValueError("this System has been released and can no longer be used")
+
+    def _check_not_view(self, method_name: str):
+        if self._is_view:
+            raise ValueError(
+                f"can not call System.{method_name} on this system since it is "
+                "a view of a system owned elsewhere."
+            )
+
+    @staticmethod
+    def unsafe_from_ptr(system):
+        """
+        Create an owning :py:class:`System` from a raw ``mta_system_t`` pointer.
+
+        The :py:class:`System` takes ownership of the pointer and will free it
+        when garbage-collected.
+        """
+        check_pointer(system)
+        obj = System.__new__(System)
+        obj._lib = _get_library()
+        obj._ptr = system
+        obj._is_view = False
+        return obj
+
+    @staticmethod
+    def unsafe_view_from_ptr(system):
+        """
+        Create a non-owning :py:class:`System` view from a raw ``mta_system_t``
+        pointer. The system will *not* be freed when the :py:class:`System` is
+        destroyed, and must outlive it.
+        """
+        check_pointer(system)
+        obj = System.__new__(System)
+        obj._lib = _get_library()
+        obj._ptr = system
+        obj._is_view = True
+        return obj
+
+    def as_mta_system_t(self):
+        """
+        Get the underlying C pointer for this :py:class:`System`.
+
+        This class still manages the system memory after the call. Use
+        :py:meth:`System.release` to take ownership of the pointer.
+        """
+        self._check_ptr()
+        return self._ptr
+
+    def release(self):
+        """
+        Release the underlying C pointer of this :py:class:`System`.
+
+        This class is no longer managing the system memory after the call.
+        """
+        self._check_not_view("release")
+        ptr = self.as_mta_system_t()
+        self._ptr = None
+        self._is_view = True
+        return ptr
+
+    def __del__(self):
+        if (
+            getattr(self, "_lib", None) is not None
+            and getattr(self, "_ptr", None)
+            and not getattr(self, "_is_view", True)
+        ):
+            self._lib.mta_system_free(self._ptr)
+
+    def __len__(self) -> int:
+        return self.size
+
+    @property
+    def size(self) -> int:
+        """Number of atoms in this system."""
+        self._check_ptr()
+        size = c_uintptr_t()
+        self._lib.mta_system_size(self._ptr, ctypes.byref(size))
+        return size.value
+
+    @property
+    def length_unit(self) -> str:
+        """Unit of length used by the positions and cell of this system."""
+        self._check_ptr()
+        unit = mta_string_t()
+        self._lib.mta_system_get_length_unit(self._ptr, ctypes.byref(unit))
+        return _string_from_mta(unit)
+
+    def _data(self, kind) -> np.ndarray:
+        self._check_ptr()
+        tensor = ctypes.POINTER(DLManagedTensorVersioned)()
+        self._lib.mta_system_get_data(self._ptr, kind, ctypes.byref(tensor))
+        check_pointer(tensor)
+        return _from_dlpack(tensor)
+
+    @property
+    def types(self) -> np.ndarray:
+        """Atomic types of all atoms, as an array with shape ``(n_atoms,)``."""
+        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_TYPES)
+
+    @property
+    def positions(self) -> np.ndarray:
+        """Positions of all atoms, as an array with shape ``(n_atoms, 3)``."""
+        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS)
+
+    @property
+    def cell(self) -> np.ndarray:
+        """Unit cell, as an array with shape ``(3, 3)``."""
+        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_CELL)
+
+    @property
+    def pbc(self) -> np.ndarray:
+        """Periodic boundary conditions, as an array with shape ``(3,)``."""
+        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
+
+    def _options_json(self, options: Union[PairListOptions, str]) -> bytes:
+        if isinstance(options, PairListOptions):
+            return json.dumps(options.to_dict()).encode("utf8")
+        return str(options).encode("utf8")
+
+    def add_pairs(self, options: Union[PairListOptions, str], pairs: TensorBlock):
+        """
+        Add a pair list (neighbor list) to this system.
+
+        Ownership of ``pairs`` is transferred to this :py:class:`System`.
+
+        :param options: :py:class:`PairListOptions` or a JSON string describing
+            the pair list
+        :param pairs: pair data, stored as a metatensor block
+        """
+        self._check_ptr()
+        if not isinstance(pairs, TensorBlock):
+            raise TypeError(
+                f"`pairs` must be a metatensor TensorBlock, not {type(pairs)}"
+            )
+        self._lib.mta_system_add_pairs(
+            self._ptr, self._options_json(options), pairs.release()
+        )
+
+    def pairs(self, options: Union[PairListOptions, str]) -> TensorBlock:
+        """
+        Get a previously stored pair list matching ``options``.
+
+        The returned block is a non-owning view into data owned by this
+        :py:class:`System`.
+        """
+        self._check_ptr()
+        block = ctypes.POINTER(mts_block_t)()
+        self._lib.mta_system_get_pairs(
+            self._ptr, self._options_json(options), ctypes.byref(block)
+        )
+        check_pointer(block)
+        return TensorBlock.unsafe_view_from_ptr(block, parent=self)
+
+    def known_pairs(self) -> list[PairListOptions]:
+        """Options of all pair lists registered with this system."""
+        self._check_ptr()
+        options = mta_string_t()
+        self._lib.mta_system_known_pairs(self._ptr, ctypes.byref(options))
+        data = json.loads(_string_from_mta(options))
+        return [PairListOptions.from_dict(item) for item in data]
+
+    def add_custom_data(self, name: str, data: TensorMap):
+        """
+        Add custom data to this system, stored under ``name``.
+
+        Ownership of ``data`` is transferred to this :py:class:`System`.
+        """
+        self._check_ptr()
+        if not isinstance(data, TensorMap):
+            raise TypeError(f"`data` must be a metatensor TensorMap, not {type(data)}")
+        self._lib.mta_system_add_custom_data(
+            self._ptr, str(name).encode("utf8"), data.release()
+        )
+
+    def custom_data(self, name: str) -> TensorMap:
+        """
+        Get the custom data previously stored under ``name``.
+
+        The returned tensor map is a non-owning view into data owned by this
+        :py:class:`System`.
+        """
+        self._check_ptr()
+        data = ctypes.POINTER(mts_tensormap_t)()
+        self._lib.mta_system_get_custom_data(
+            self._ptr, str(name).encode("utf8"), ctypes.byref(data)
+        )
+        check_pointer(data)
+        return TensorMap.unsafe_view_from_ptr(data, parent=self)
+
+    def known_custom_data(self) -> list[str]:
+        """Names of all custom data registered with this system."""
+        self._check_ptr()
+        names = mta_string_t()
+        self._lib.mta_system_known_custom_data(self._ptr, ctypes.byref(names))
+        return list(json.loads(_string_from_mta(names)))
+
+    def __repr__(self) -> str:
+        if not getattr(self, "_ptr", None):
+            return "System(<released>)"
+        return f"System({self.size} atoms, length_unit={self.length_unit!r})"
