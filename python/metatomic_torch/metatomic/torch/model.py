@@ -319,11 +319,17 @@ class AtomisticModel(torch.nn.Module):
         module_is_atomistic_model = is_atomistic_model(module)
         if module_is_atomistic_model:
             # module was already checked; take the sub-module as is, and copy the list
-            # of outputs declared by the model initially
+            # of outputs declared by the model initially. Models exported before that
+            # list was stored only have it in their capabilities.
             self.module = module.module
-            self._model_capabilities_outputs_names = (
-                module._model_capabilities_outputs_names
-            )
+            if hasattr(module, "_model_capabilities_outputs_names"):
+                self._model_capabilities_outputs_names = (
+                    module._model_capabilities_outputs_names
+                )
+            else:
+                self._model_capabilities_outputs_names = list(
+                    capabilities.outputs.keys()
+                )
         else:
             _check_annotation(module)
             self.module = module

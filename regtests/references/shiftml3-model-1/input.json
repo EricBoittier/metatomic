@@ -1,0 +1,71 @@
+{
+  "model": "shiftml3-model-1",
+  "length_unit": "angstrom",
+  "systems": [
+    {
+      "types": [
+        8,
+        1,
+        1
+      ],
+      "positions": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.9584,
+          0.0,
+          0.0
+        ],
+        [
+          -0.2396,
+          0.9278,
+          0.0
+        ]
+      ],
+      "cell": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "pbc": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "selected_atoms": null,
+  "outputs": {
+    "mtt::cs_iso": {
+      "unit": "",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "cs_iso.mts",
+      "rtol": 1e-05,
+      "atol": 1e-05
+    },
+    "feature": {
+      "unit": "",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "feature.mts",
+      "rtol": 0.0001,
+      "atol": 0.0001
+    }
+  }
+}
