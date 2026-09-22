@@ -2,5 +2,21 @@
   "pet-mad-s-v1.5.0": {
     "dependencies": ["upet"],
     "source": "import upet; upet.save_upet(model='pet-mad', size='s', version='1.5.0')"
+  },
+  "pet-mad-dos-v1.0": {
+    "dependencies": ["upet"],
+    "source": "from upet.ase.dos import get_pet_mad_dos\nget_pet_mad_dos(version='1.0').save('pet-mad-dos-v1.0.pt')\n"
+  },
+  "pet-mad-featurizer-v1.0.0": {
+    "dependencies": ["upet"],
+    "source": "from upet.ase.explore import PETMADFeaturizer\nPETMADFeaturizer(version='1.0.0').mad_explorer.save('pet-mad-featurizer-v1.0.0.pt')\n"
+  },
+  "flashmd-pet-omatpes-v2-16fs": {
+    "dependencies": ["flashmd"],
+    "source": "import os\nimport sys\nfrom pathlib import Path\nos.environ['PATH'] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', '')\nfrom flashmd import get_pretrained\n_, model = get_pretrained('pet-omatpes-v2', 16)\nmodel.save('flashmd-pet-omatpes-v2-16fs.pt')\n"
+  },
+  "shiftml3-model-1": {
+    "dependencies": ["shiftml"],
+    "source": "import os\nimport urllib.request\nfrom shiftml.utils.loading import load_model\nos.makedirs('download', exist_ok=True)\nurllib.request.urlretrieve(\n    'https://zenodo.org/records/15767390/files/model_1.pt?download=1',\n    'download/model.pt',\n)\nload_model('download/model.pt').save('shiftml3-model-1.pt')\n"
   }
 }

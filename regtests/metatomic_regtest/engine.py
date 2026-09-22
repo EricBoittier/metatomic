@@ -31,6 +31,7 @@ Input = namedtuple(
         "selected_atoms",
         "outputs",
         "inputs",
+        "check_consistency",
     ],
 )
 
@@ -60,6 +61,7 @@ def load_input(reference: str) -> Input:
         selected_atoms=selected_atoms,
         outputs=data["outputs"],
         inputs=data.get("inputs", {}),
+        check_consistency=data.get("check_consistency", True),
     )
 
 
@@ -137,7 +139,11 @@ def _add_model_inputs(input: Input, model: AtomisticModel, systems: List[System]
     import metatensor.torch as mts
 
     requested = model.requested_inputs(use_new_names=True)
-    for name in requested.keys():
+    # Some exported models read system data they never declared through
+    # requested_inputs(). Attach every input the case lists, and still fail when a
+    # declared input is missing.
+    names = list(dict.fromkeys([*requested.keys(), *input.inputs.keys()]))
+    for name in names:
         if name not in input.inputs:
             raise ValueError(
                 f"the model requires the '{name}' input, but {input.path} does not "
@@ -325,7 +331,11 @@ def run_model(model: AtomisticModel, input: Input) -> Dict[str, TensorMap]:
         selected_atoms=input.selected_atoms,
     )
 
-    outputs = model(systems=systems, options=options, check_consistency=True)
+    outputs = model(
+        systems=systems,
+        options=options,
+        check_consistency=input.check_consistency,
+    )
 
     results = {}
     for name, output in input.outputs.items():

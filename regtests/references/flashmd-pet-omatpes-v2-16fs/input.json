@@ -1,0 +1,112 @@
+{
+  "model": "flashmd-pet-omatpes-v2-16fs",
+  "length_unit": "angstrom",
+  "systems": [
+    {
+      "types": [
+        14,
+        14,
+        14,
+        14,
+        14,
+        14,
+        14,
+        14
+      ],
+      "positions": [
+        [
+          -0.045205,
+          0.029973,
+          0.093936
+        ],
+        [
+          1.109695,
+          1.31844,
+          1.22018
+        ],
+        [
+          0.110888,
+          2.624246,
+          2.74494
+        ],
+        [
+          1.448454,
+          3.973221,
+          4.006242
+        ],
+        [
+          2.81727,
+          -0.08222,
+          2.721388
+        ],
+        [
+          4.045614,
+          1.352814,
+          4.086579
+        ],
+        [
+          2.752344,
+          2.967519,
+          -0.14145
+        ],
+        [
+          4.134036,
+          3.924733,
+          1.341168
+        ]
+      ],
+      "cell": [
+        [
+          5.55,
+          0.0,
+          0.0
+        ],
+        [
+          0.12,
+          5.31,
+          0.0
+        ],
+        [
+          0.0,
+          0.07,
+          5.48
+        ]
+      ],
+      "pbc": [
+        true,
+        true,
+        true
+      ]
+    }
+  ],
+  "selected_atoms": null,
+  "inputs": {
+    "momenta": "momenta.mts"
+  },
+  "outputs": {
+    "positions": {
+      "unit": "A",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "predicted_positions.mts",
+      "rtol": 1e-05,
+      "atol": 1e-05
+    },
+    "momenta": {
+      "unit": "(eV*u)^(1/2)",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "predicted_momenta.mts",
+      "rtol": 1e-05,
+      "atol": 1e-05
+    },
+    "features": {
+      "unit": "",
+      "sample_kind": "atom",
+      "gradients": [],
+      "reference": "features.mts",
+      "rtol": 0.0001,
+      "atol": 0.0001
+    }
+  }
+}
