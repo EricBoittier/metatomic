@@ -303,6 +303,7 @@ if __name__ == "__main__":
 
     install_requires = [
         "metatensor-core >=0.2.2,<0.4",
+        "ctypes-dlpack",
     ]
 
     setup(

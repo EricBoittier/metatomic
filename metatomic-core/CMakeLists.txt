@@ -106,12 +106,15 @@ function(check_compatible_versions _actual_ _requested_)
 endfunction()
 
 
-# 0.3.0 has never been released (fork or upstream): metatensor-core's latest
-# tag, and what our metatomic-core branch of metatensor actually builds, is
-# 0.2.5 (see metatomic-core/Cargo.toml's own `metatensor = "0.5.1"` Rust
-# crate pin, a different version series, for comparison). This was scaffolded
-# ahead of an actual metatensor-core release; pin to what exists.
-set(REQUIRED_METATENSOR_VERSION "0.2.5")
+# 0.3.0 has never been released (fork or upstream). metatensor's own
+# metatomic-core branch built metatensor-core 0.2.5, but pipeline-bench (see
+# metatensor commit 57eb567) tracks metatensor's `main` instead -- needed for
+# the metatensor-torch >=0.10.0 bump metatomic now requires -- and main's
+# Cargo.toml is still at 0.2.4. check_compatible_versions() below treats any
+# 0.2.x as fine (major 0, matching minor); only CMake's own find_package
+# version floor is patch-strict, so pin the floor to what main actually
+# builds instead of what the now-unused metatomic-core branch built.
+set(REQUIRED_METATENSOR_VERSION "0.2.4")
 # Either metatensor is built as part of the same CMake project, or we try to
 # find the corresponding CMake package
 if (TARGET metatensor)
