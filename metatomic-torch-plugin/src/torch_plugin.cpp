@@ -18,15 +18,19 @@
 // inputs and outputs are CPU arrays.
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <ATen/DLConvertor.h>
+#include <ATen/Parallel.h>
 #include <torch/cuda.h>
 #include <torch/script.h>
 
@@ -88,31 +92,98 @@ std::string sample_kind_name(mta::SampleKind kind)
     }
 }
 
+//! A CPU tensor viewing engine memory, copied to `device` (a copy even on the CPU)
+torch::Tensor copy_to(const torch::Tensor& view, torch::Device device, torch::Dtype dtype)
+{
+    return device.is_cpu() && view.scalar_type() == dtype ? view.clone() : view.to(device, dtype);
+}
+
 //! A metatensor-core Labels as metatensor-torch Labels
 mtst::Labels to_torch(const metatensor::Labels& labels, torch::Device device)
 {
-    const auto count = static_cast<int64_t>(labels.count());
-    const auto size  = static_cast<int64_t>(labels.size());
-    auto       values = torch::zeros({ count, size }, torch::kInt32);
+    const auto count  = static_cast<int64_t>(labels.count());
+    const auto size   = static_cast<int64_t>(labels.size());
+    auto       values = torch::zeros({ count, size }, torch::TensorOptions().dtype(torch::kInt32).device(device));
     if (count > 0 && size > 0)
     {
         const auto cpu = labels.values_cpu();
-        std::memcpy(values.data_ptr<int32_t>(), cpu.data(), sizeof(int32_t) * count * size);
+        values = copy_to(torch::from_blob(const_cast<int32_t*>(cpu.data()), { count, size }, torch::kInt32),
+                         device, torch::kInt32);
     }
     std::vector<std::string> names;
     for (const auto& name : labels.names())
     {
         names.emplace_back(name);  // core names are C strings, torch wants std::string
     }
-    return torch::make_intrusive<mtst::LabelsHolder>(names, values.to(device));
+    // metatensor-core labels are unique already
+    return torch::make_intrusive<mtst::LabelsHolder>(names, values, metatensor::assume_unique{});
 }
 
-//! The float64 values of a metatensor-core block as a torch tensor
-torch::Tensor block_values(metatensor::TensorBlock& block)
+//! Per-phase wall times of execute_inner, printed every 1000 calls when METATOMIC_TORCH_TIMER
+//! is set (synchronizes the device at each phase, so only for profiling)
+class PhaseTimer
 {
-    auto                 array = block.values<double>();
-    std::vector<int64_t> shape(array.shape().begin(), array.shape().end());
-    return torch::from_blob(const_cast<double*>(array.data()), shape, torch::kFloat64).clone();
+public:
+    explicit PhaseTimer(torch::Device device) : device_(device), start_(now()) {}
+
+    void lap(const char* phase)
+    {
+        if (!enabled())
+        {
+            return;
+        }
+        if (device_.is_cuda())
+        {
+            torch::cuda::synchronize();
+        }
+        const auto t = now();
+        totals()[phase] += t - start_;
+        start_ = t;
+        if (std::string(phase) == "backward+outputs" && ++calls() % 1000 == 0)
+        {
+            for (const auto& [name, total] : totals())
+            {
+                std::fprintf(stderr, "[metatomic-torch] %-18s %.3f ms/call\n", name.c_str(), 1e3 * total / calls());
+            }
+        }
+    }
+
+private:
+    static double now()
+    {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    static bool enabled()
+    {
+        static const bool on = std::getenv("METATOMIC_TORCH_TIMER") != nullptr;
+        return on;
+    }
+    static std::map<std::string, double>& totals()
+    {
+        static std::map<std::string, double> t;
+        return t;
+    }
+    static long& calls()
+    {
+        static long n = 0;
+        return n;
+    }
+
+    torch::Device device_;
+    double        start_;
+};
+
+//! The values of a metatensor-core block as a torch tensor on `device`. Engines send pair
+//! vectors and custom data in the model dtype, float64 or float32.
+torch::Tensor block_values(metatensor::TensorBlock& block, torch::Dtype dtype, torch::Device device)
+{
+    const auto copy = [&](auto array)
+    {
+        using T = std::remove_cv_t<std::remove_reference_t<decltype(*array.data())>>;
+        std::vector<int64_t> shape(array.shape().begin(), array.shape().end());
+        return copy_to(torch::from_blob(const_cast<T*>(array.data()), shape, dtype), device, dtype);
+    };
+    return dtype == torch::kFloat64 ? copy(block.values<double>()) : copy(block.values<float>());
 }
 
 //! A metatensor-core tensor map (custom data, e.g. charges) as a metatensor-torch one
@@ -128,7 +199,7 @@ mtst::TensorMap to_torch(metatensor::TensorMap map, torch::Device device, torch:
             components.push_back(to_torch(c, device));
         }
         blocks.push_back(torch::make_intrusive<mtst::TensorBlockHolder>(
-                block_values(block).to(device, dtype), to_torch(block.samples(), device), components,
+                block_values(block, dtype, device), to_torch(block.samples(), device), components,
                 to_torch(block.properties(), device)));
     }
     return torch::make_intrusive<mtst::TensorMapHolder>(to_torch(map.keys(), device), blocks);
@@ -202,6 +273,24 @@ public:
         }
         device_ = torch::Device(device);
         model_.to(device_);
+
+        // CPU threads for torch (default: torch's own choice)
+        std::string threads;
+        if (const char* env = std::getenv("METATOMIC_TORCH_THREADS"))
+        {
+            threads = env;
+        }
+        if (auto it = options.find("threads"); it != options.end())
+        {
+            threads = it->second;
+        }
+        if (!threads.empty())
+        {
+            at::set_num_threads(std::max(1, std::stoi(threads)));
+        }
+        // dynamic-shape fusion, as LAMMPS and GROMACS use for these models
+        torch::jit::FusionStrategy fusion = { { torch::jit::FusionBehavior::DYNAMIC, 10 } };
+        torch::jit::setFusionStrategy(fusion);
 
         if (device_.is_cuda())
         {
@@ -282,6 +371,7 @@ public:
             gradients = gradients || !output.gradients().empty();
         }
 
+        PhaseTimer timer(device_);
         // Torch systems: positions and cell scaled by a per-system strain, for the virial
         std::vector<mtt::System>   torchSystems;
         std::vector<torch::Tensor> positions, strains;
@@ -300,7 +390,7 @@ public:
             for (const auto& options : neighbors_)
             {
                 auto       block   = system.pairs(core_pairs(options));
-                auto       vectors = block_values_as(block).to(device_, dtype_);
+                auto       vectors = block_values(block, dtype_, device_);
                 auto       nl      = torch::make_intrusive<mtst::TensorBlockHolder>(
                         vectors, to_torch(block.samples(), device_),
                         std::vector<mtst::Labels>{ to_torch(block.components()[0], device_) },
@@ -315,6 +405,7 @@ public:
             torchSystems.push_back(torchSystem);
         }
 
+        timer.lap("inputs");
         // Run the model for the requested outputs, in the model's own units
         auto evaluation = torch::make_intrusive<mtt::ModelEvaluationOptionsHolder>();
         evaluation->set_length_unit(capabilities_->length_unit());
@@ -333,6 +424,7 @@ public:
         }
         auto result = model_.forward({ torchSystems, evaluation, /*check_consistency=*/false }).toGenericDict();
 
+        timer.lap("forward");
         std::vector<metatensor::TensorMap> tensors;
         for (const auto& output : requested)
         {
@@ -340,6 +432,7 @@ public:
             tensors.push_back(dtype_ == torch::kFloat64 ? to_core<double>(map, output, positions, strains)
                                                          : to_core<float>(map, output, positions, strains));
         }
+        timer.lap("backward+outputs");
         return tensors;
     }
 
@@ -351,18 +444,6 @@ private:
                 .full_list(options->full_list())
                 .strict(options->strict())
                 .build();
-    }
-
-    torch::Tensor block_values_as(metatensor::TensorBlock& block) const
-    {
-        // the engine sends pair vectors in the model dtype
-        if (dtype_ == torch::kFloat64)
-        {
-            return block_values(block);
-        }
-        auto                 array = block.values<float>();
-        std::vector<int64_t> shape(array.shape().begin(), array.shape().end());
-        return torch::from_blob(const_cast<float*>(array.data()), shape, torch::kFloat32).clone();
     }
 
     //! One output as a metatensor-core tensor map, with the gradients the engine asked for
