@@ -18,7 +18,9 @@ What it does (`src/torch_plugin.cpp`):
   and returns `positions` and `strain` gradients of the total from autograd, attached to the
   first sample of each system;
 * loads PyTorch's CUDA linear algebra once, so engines evaluating from several threads do
-  not race on first use.
+  not race on first use;
+* reads pair vectors and custom data in the model dtype (float32 for PET-OMol), and converts
+  labels without re-checking their uniqueness, which metatensor-core guarantees.
 
 metatomic-core converts the systems to the model's length unit before calling the plugin,
 and the outputs from the model's units to the requested ones afterwards.
@@ -52,8 +54,16 @@ nlohmann_json (>= 3.11) must be findable, and CUDA builds of torch need
 
 Load the plugin, then load the `.pt` file: `mta_load_plugin("libmetatomic_torch_plugin.so")`
 and `mta_load_model("model.pt", options, NULL, &model)`. Load options (JSON object of
-strings): `device` (`cuda`, `cpu`, ...; default CUDA when available, or the
-`METATOMIC_TORCH_DEVICE` environment variable) and `extensions_directory`.
+strings):
+
+* `device`: `cuda`, `cpu`, ...; default CUDA when available, or the `METATOMIC_TORCH_DEVICE`
+  environment variable;
+* `threads`: torch's CPU threads, or `METATOMIC_TORCH_THREADS` (default: torch's choice);
+* `extensions_directory`.
+
+The plugin also uses torch's dynamic-shape JIT fusion (as LAMMPS and GROMACS do for these
+models). With `METATOMIC_TORCH_TIMER` set, it prints the mean time of its phases (inputs,
+forward, backward and outputs) every 1000 calls; that synchronizes the device at each phase.
 
 In GROMACS (C-API force provider): `metatomic-model = model.pt` and
 `metatomic-extensions = /path/to/libmetatomic_torch_plugin.so`.
@@ -68,4 +78,16 @@ GROMACS C API + this plugin against GROMACS's own libtorch path, same inputs:
 | ML energy, step 0 | -54934.011719 kJ/mol | -54934.011719 kJ/mol |
 | ML energy, step 20 | -54966.808594 kJ/mol | -54966.808594 kJ/mol |
 | total energy, steps 0 -> 20 | -123989.66 -> -123989.95 | -123990.13 -> -123990.26 |
-| ms/step (1000 steps, one GPU) | 18.8 | 16.3 |
+| ms/step, 1000 steps, 8 pinned threads, RTX 4070 Ti SUPER (4 runs) | 15.40-15.47 | 15.00-15.11 |
+
+Unpinned runs on the same machine vary by +-1.5 ms/step, so pin threads (`-pin on`) when
+comparing. Torch's thread count (1 or 24) changes nothing here.
+
+PET-OMol s v1.0.0 on hemoglobin, the four hemes as four ML sites (per-system `charge` -2 and
+`spin_multiplicity` 5, float32 model, 51,402 atoms):
+
+| | C API + plugin | libtorch path |
+|---|---|---|
+| ML energy | -162503.281250 kJ/mol | -162503.281250 kJ/mol |
+| forces | max difference 0.010 kJ/mol/nm, for forces up to 5,370 | |
+| NVE, 1 ps (dt 0.5 fs), total energy range / drift | 12.50 kJ/mol / 0.81 kJ/mol/ps | 12.62 / 1.76 |
