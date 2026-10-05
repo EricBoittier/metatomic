@@ -498,12 +498,18 @@ model = metatomic_lj_test.lennard_jones_model(
 model.save("{model_path}", collect_extensions="{extensions_directory}")
     """
 
-    subprocess.run(
+    export = subprocess.run(
         [sys.executable, "-c", script],
-        check=True,
         cwd=tmpdir,
         capture_output=True,
+        text=True,
     )
+    if export.returncode != 0:
+        raise RuntimeError(
+            "failed to export the model with extensions\n"
+            f"stdout:\n{export.stdout}\n"
+            f"stderr:\n{export.stderr}"
+        )
 
     message = (
         "This is likely due to missing TorchScript extensions.\n"
