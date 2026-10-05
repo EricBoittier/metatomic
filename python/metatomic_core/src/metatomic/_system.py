@@ -338,6 +338,62 @@ def _guess_arrays_backend(array) -> str:
     return "dlpack"
 
 
+def _contains_jax_tracer(*arrays) -> bool:
+    """
+    Return ``True`` when any array is a JAX tracer.
+
+    Tracers exist only inside transformations such as ``jax.jit`` and cannot be
+    exported through DLPack, so a :py:class:`System` built from them keeps the
+    arrays in Python instead of creating an ``mta_system_t``.
+    """
+    try:
+        import jax
+    except ImportError:
+        return False
+
+    return any(isinstance(array, jax.core.Tracer) for array in arrays)
+
+
+def _as_static_vector(array, name: str, cast):
+    """
+    Convert a 1-D array to a hashable tuple of Python values.
+
+    ``types`` and ``pbc`` are stored as pytree metadata, so they have to be
+    concrete. ``name`` is used in the error when ``array`` is still a tracer.
+    """
+    try:
+        values = np.asarray(array).reshape(-1)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            f"System.{name} must be a concrete array to use System as a JAX pytree"
+        ) from err
+
+    return tuple(cast(value) for value in values)
+
+
+def _restore_static_vector(values, kind: str, backend: str):
+    """Rebuild a ``types`` or ``pbc`` array from pytree metadata."""
+    if backend == "torch":
+        import torch
+
+        dtype = torch.int32 if kind == "types" else torch.bool
+        return torch.tensor(values, dtype=dtype)
+
+    if backend == "jax":
+        import jax
+        import jax.numpy as jnp
+
+        dtype = jnp.int32 if kind == "types" else jnp.bool_
+        # Inside jit this must stay a concrete array. A normal jnp.array call
+        # would be traced, and the result could no longer be stored as static
+        # pytree metadata.
+        with jax.ensure_compile_time_eval():
+            return jnp.array(values, dtype=dtype)
+
+    dtype = np.int32 if kind == "types" else np.bool_
+    return np.array(values, dtype=dtype)
+
+
 def _array_from_dlpack(tensor, backend):
     """Convert a borrowed DLPack tensor from the C API to the requested backend."""
     if backend is None:
@@ -406,6 +462,18 @@ class System:
     Arbitrary per-system data stored as a :py:class:`metatensor.TensorMap` can
     be attached with :py:meth:`System.add_custom_data`.
 
+    When JAX is installed, :py:class:`System` is registered as a pytree.
+    :py:attr:`positions` and :py:attr:`cell` are the values JAX traces, so
+    ``jax.jit`` and ``jax.value_and_grad`` apply to them. :py:attr:`types`,
+    :py:attr:`pbc`, :py:attr:`length_unit`, and :py:attr:`arrays_backend` are
+    static: changing them recompiles a jitted function, and they do not receive
+    gradients. Pair lists and custom data are not part of the pytree, and
+    passing a system that contains either to JAX raises :py:class:`ValueError`.
+    A system produced by a JAX transformation keeps its arrays in Python. The
+    C system is created if something asks for the pointer and the arrays are
+    concrete. Inside the transformation itself there is no C pointer; the
+    array properties still return the traced values.
+
     All C API errors are raised as :py:class:`metatomic.MetatomicError`.
     """
 
@@ -434,6 +502,16 @@ class System:
         """
         self._lib = _get_library()
         self._is_view = False
+        self._ptr = None
+        self._traced_arrays = None
+        if _contains_jax_tracer(types, positions, cell, pbc):
+            # Tracers have no DLPack export. Hold them on the Python object so
+            # attribute access inside jit/grad returns the traced values.
+            if arrays_backend is None:
+                arrays_backend = "jax"
+            self._hold_arrays(length_unit, types, positions, cell, pbc, arrays_backend)
+            return
+
         if arrays_backend is None:
             guessed = {
                 "types": _guess_arrays_backend(types),
@@ -489,6 +567,7 @@ class System:
         obj._ptr = system
         obj._is_view = False
         obj._arrays_backend = None
+        obj._traced_arrays = None
         return obj
 
     @staticmethod
@@ -506,6 +585,7 @@ class System:
         obj._ptr = system
         obj._is_view = True
         obj._arrays_backend = None
+        obj._traced_arrays = None
         return obj
 
     def as_mta_system_t(self):
@@ -515,9 +595,42 @@ class System:
         This class still manages the system memory after the call. Use
         :py:meth:`System.release` to take ownership of the pointer.
         """
+        if self._traced_arrays is not None:
+            if _contains_jax_tracer(*self._traced_arrays.values()):
+                raise ValueError(
+                    "this System is part of a JAX transformation and has no C pointer"
+                )
+            self._materialize()
         if not self._ptr:
             raise ValueError("this System has been released and can no longer be used")
         return self._ptr
+
+    def _hold_arrays(self, length_unit, types, positions, cell, pbc, arrays_backend):
+        """Keep the system arrays on the Python object, with no C system yet."""
+        self.arrays_backend = arrays_backend
+        self._length_unit = str(length_unit)
+        self._traced_arrays = {
+            "types": types,
+            "positions": positions,
+            "cell": cell,
+            "pbc": pbc,
+        }
+
+    def _materialize(self):
+        """Create the C system from arrays held on the Python object."""
+        arrays = self._traced_arrays
+        ptr = ctypes.POINTER(mta_system_t)()
+        self._lib.mta_system_create(
+            self._length_unit.encode("utf8"),
+            array_as_dlpack(arrays["types"]),
+            array_as_dlpack(arrays["positions"]),
+            array_as_dlpack(arrays["cell"]),
+            array_as_dlpack(arrays["pbc"]),
+            ctypes.byref(ptr),
+        )
+        check_pointer(ptr)
+        self._ptr = ptr
+        self._traced_arrays = None
 
     def release(self):
         """
@@ -545,6 +658,9 @@ class System:
     @property
     def size(self) -> int:
         """Number of atoms in this system."""
+        if self._traced_arrays is not None:
+            return self._traced_arrays["types"].shape[0]
+
         size = c_uintptr_t()
         self._lib.mta_system_size(self.as_mta_system_t(), ctypes.byref(size))
         return size.value
@@ -552,6 +668,9 @@ class System:
     @property
     def length_unit(self) -> str:
         """Unit of length used by the positions and cell of this system."""
+        if self._traced_arrays is not None:
+            return self._length_unit
+
         unit = mta_string_t()
         self._lib.mta_system_get_length_unit(self.as_mta_system_t(), ctypes.byref(unit))
         return _string_from_mta(unit)
@@ -590,7 +709,10 @@ class System:
 
         self._arrays_backend = backend
 
-    def _data(self, kind):
+    def _data(self, name, kind):
+        if self._traced_arrays is not None:
+            return self._traced_arrays[name]
+
         if self._arrays_backend is None:
             raise ValueError(
                 "Arrays backend not initialized, please set System.arrays_backend"
@@ -609,7 +731,7 @@ class System:
 
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
-        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_TYPES)
+        return self._data("types", mta_system_data_kind.MTA_SYSTEM_DATA_TYPES)
 
     @property
     def positions(self):
@@ -618,7 +740,7 @@ class System:
 
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
-        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS)
+        return self._data("positions", mta_system_data_kind.MTA_SYSTEM_DATA_POSITIONS)
 
     @property
     def cell(self):
@@ -627,7 +749,7 @@ class System:
 
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
-        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_CELL)
+        return self._data("cell", mta_system_data_kind.MTA_SYSTEM_DATA_CELL)
 
     @property
     def pbc(self):
@@ -636,7 +758,7 @@ class System:
 
         The returned array uses the configured :py:attr:`arrays_backend`.
         """
-        return self._data(mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
+        return self._data("pbc", mta_system_data_kind.MTA_SYSTEM_DATA_PBC)
 
     def add_pairs(self, options: PairListOptions, pairs: TensorBlock):
         """
@@ -719,6 +841,69 @@ class System:
         return list(json.loads(_string_from_mta(names)))
 
     def __repr__(self) -> str:
-        if not getattr(self, "_ptr", None):
+        if self._traced_arrays is None and not getattr(self, "_ptr", None):
             return "System(<released>)"
         return f"System({self.size} atoms, length_unit={self.length_unit!r})"
+
+
+def _flatten_system(system: System):
+    """
+    Flatten a :py:class:`System` for JAX.
+
+    ``positions`` and ``cell`` are the traced children. Everything else is
+    static metadata.
+    """
+    if system._traced_arrays is None:
+        if not system._ptr:
+            raise ValueError("this System has been released and can no longer be used")
+        if system.known_pairs() or system.known_custom_data():
+            raise ValueError(
+                "JAX pytree conversion of System does not include pair lists "
+                "or custom data"
+            )
+
+    return (system.positions, system.cell), (
+        system.length_unit,
+        system.arrays_backend,
+        _as_static_vector(system.types, "types", int),
+        _as_static_vector(system.pbc, "pbc", bool),
+    )
+
+
+def _unflatten_system(aux, children) -> System:
+    """Rebuild a :py:class:`System` from the result of :py:func:`_flatten_system`.
+
+    The arrays stay on the Python object. Gradients are not physical systems
+    (for example the cell gradient is nonzero for non-periodic directions), so
+    this does not go through ``mta_system_create``. The C system is created
+    later, if something asks for the pointer and the arrays are concrete.
+    """
+    length_unit, arrays_backend, types, pbc = aux
+    positions, cell = children
+    system = System.__new__(System)
+    system._lib = _get_library()
+    system._is_view = False
+    system._ptr = None
+    system._traced_arrays = None
+    system._hold_arrays(
+        length_unit,
+        _restore_static_vector(types, "types", arrays_backend),
+        positions,
+        cell,
+        _restore_static_vector(pbc, "pbc", arrays_backend),
+        arrays_backend,
+    )
+    return system
+
+
+def _register_system_pytree():
+    """Register :py:class:`System` as a JAX pytree when JAX is installed."""
+    try:
+        from jax.tree_util import register_pytree_node
+    except ImportError:
+        return
+
+    register_pytree_node(System, _flatten_system, _unflatten_system)
+
+
+_register_system_pytree()

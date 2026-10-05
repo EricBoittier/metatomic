@@ -1,6 +1,7 @@
 import copy
 import math
 import operator
+import re
 import sys
 
 import numpy as np
@@ -570,3 +571,120 @@ def test_system_arrays_backend_set_jax(system):
     assert system.arrays_backend == "jax"
     assert isinstance(system.positions, jax.Array)
     assert float(system.positions[3, 0]) == 10.0
+
+
+def _jax_system():
+    jax = pytest.importorskip("jax")
+    jax.config.update("jax_enable_x64", True)
+    jnp = jax.numpy
+
+    types = jnp.array([1, 4, 7, 10], dtype=jnp.int32)
+    positions = jnp.array(
+        [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+            [10.0, 11.0, 12.0],
+        ],
+        dtype=jnp.float64,
+    )
+    cell = jnp.array(
+        [[10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 10.0]],
+        dtype=jnp.float64,
+    )
+    pbc = jnp.array([True, False, True])
+    return System("nm", types, positions, cell, pbc)
+
+
+def test_system_jax_pytree_jit():
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+    system = _jax_system()
+
+    @jax.jit
+    def shift(system):
+        return System(
+            system.length_unit,
+            system.types,
+            system.positions + 1.0,
+            system.cell,
+            system.pbc,
+            arrays_backend=system.arrays_backend,
+        )
+
+    shifted = shift(system)
+    assert shifted.length_unit == "nm"
+    assert shifted.arrays_backend == "jax"
+    assert jnp.allclose(shifted.positions, system.positions + 1.0)
+    assert jnp.allclose(shifted.cell, system.cell)
+    assert jnp.array_equal(shifted.types, system.types)
+    assert jnp.array_equal(shifted.pbc, system.pbc)
+
+    # JAX appends this note when it hides frames from a Python exception
+    # raised while tracing.
+    message = (
+        "this System is part of a JAX transformation and has no C pointer\n"
+        "--------------------\n"
+        "For simplicity, JAX has removed its internal frames from the "
+        "traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off "
+        "to include these."
+    )
+
+    @jax.jit
+    def pointer(system):
+        system.as_mta_system_t()
+        return system.positions
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        pointer(system)
+
+
+def test_system_jax_value_and_grad():
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+    system = _jax_system()
+
+    def energy(system):
+        return jnp.sum(system.positions**2) + jnp.sum(system.cell)
+
+    value, gradient = jax.value_and_grad(energy)(system)
+    assert jnp.allclose(value, energy(system))
+    assert jnp.allclose(gradient.positions, 2.0 * system.positions)
+    assert jnp.allclose(gradient.cell, jnp.ones_like(system.cell))
+    assert gradient.length_unit == system.length_unit
+    assert jnp.array_equal(gradient.types, system.types)
+    assert jnp.array_equal(gradient.pbc, system.pbc)
+
+
+def test_system_jax_pytree_rejects_pairs(system, pair_block):
+    jax = pytest.importorskip("jax")
+
+    options = PairListOptions(cutoff=1.0, full_list=True)
+    system.add_pairs(options, pair_block)
+
+    message = (
+        "JAX pytree conversion of System does not include pair lists or custom data"
+    )
+    with pytest.raises(ValueError, match=message):
+        jax.tree_util.tree_flatten(system)
+
+
+def test_system_jax_pytree_rejects_custom_data(system, custom_data):
+    jax = pytest.importorskip("jax")
+
+    system.add_custom_data("test::my_data", custom_data)
+
+    message = (
+        "JAX pytree conversion of System does not include pair lists or custom data"
+    )
+    with pytest.raises(ValueError, match=message):
+        jax.tree_util.tree_flatten(system)
+
+
+def test_system_jax_pytree_rejects_released_system(system):
+    jax = pytest.importorskip("jax")
+
+    system.release()
+    message = "this System has been released and can no longer be used"
+    with pytest.raises(ValueError, match=message):
+        jax.tree_util.tree_flatten(system)
