@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -322,7 +323,8 @@ public:
                                        .sample_kind(sample_kind(entry.value()->sample_kind()))
                                        .build());
         }
-        return builder.atomic_types(capabilities_->atomic_types)
+        const auto& types = capabilities_->atomic_types;
+        return builder.atomic_types(std::vector<int>(types.begin(), types.end()))
                 .interaction_range(capabilities_->interaction_range)
                 .length_unit(capabilities_->length_unit())
                 // the engine hands over CPU arrays; the plugin moves them to its device
@@ -362,7 +364,7 @@ public:
     }
 
     std::vector<metatensor::TensorMap> execute_inner(const std::vector<mta::System>& systems,
-                                                     const metatensor::Labels*        selected,
+                                                     std::optional<metatensor::Labels> selected,
                                                      const std::vector<mta::Quantity>& requested) override
     {
         bool gradients = false;
@@ -418,7 +420,7 @@ public:
             outputs.insert(output.name(), option);
         }
         evaluation->outputs = outputs;
-        if (selected != nullptr)
+        if (selected)
         {
             evaluation->set_selected_atoms(to_torch(*selected, device_));
         }
