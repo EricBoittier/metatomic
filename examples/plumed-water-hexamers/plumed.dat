@@ -1,0 +1,5 @@
+UNITS LENGTH=A TIME=fs ENERGY=kj/mol
+rg: METATOMIC MODEL=oxygen-rg PLUGIN_LIBRARY=./hexamer.dylib PLUGIN=water-hexamer SPECIES1=1,4,7,10,13,16 SPECIES2=2,3,5,6,8,9,11,12,14,15,17,18 SPECIES_TO_TYPES=8,1
+# The first action registers the plugin globally; do not load it twice.
+cn: METATOMIC MODEL=oxygen-cn PLUGIN=water-hexamer SPECIES1=1,4,7,10,13,16 SPECIES2=2,3,5,6,8,9,11,12,14,15,17,18 SPECIES_TO_TYPES=8,1
+PRINT ARG=rg,cn FILE=COLVAR STRIDE=1 FMT=%.10f

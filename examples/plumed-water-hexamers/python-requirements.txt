@@ -1,0 +1,6 @@
+# Python packages for gradient checks and ASE MD; PLUMED kernel is built separately.
+ase==3.29.0
+plumed==2.10.0
+numpy==2.5.4
+scipy==1.18.1
+matplotlib==3.11.2

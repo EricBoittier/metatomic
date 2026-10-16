@@ -1,0 +1,22 @@
+diff --git a/src/metatomic/metatomic_core.cpp b/src/metatomic/metatomic_core.cpp
+index 647ff9a84..bd747917e 100644
+--- a/src/metatomic/metatomic_core.cpp
++++ b/src/metatomic/metatomic_core.cpp
+@@ -329,7 +329,7 @@ CoreBackend::CoreBackend(
+                 .build()
+         );
+
+-        auto inputs = model_.requested_inputs(outputs_);
++        auto inputs = model_.requested_inputs();
+         if (!inputs.empty()) {
+             std::string names;
+             for (const auto& q: inputs) {
+@@ -347,7 +347,7 @@ CoreBackend::CoreBackend(
+         positions_gradient_factor_ = mta::unit_conversion_factor(length_unit, model_length_unit);
+
+         log.printf("  the following neighbor lists have been requested:\n");
+-        for (auto& options: model_.requested_pair_lists(outputs_)) {
++        for (auto& options: model_.requested_pair_lists()) {
+             log.printf("    - %s list, %g %s cutoff (requested %g %s)\n",
+                 options.full_list() ? "full" : "half",
+                 options.cutoff() * to_engine,

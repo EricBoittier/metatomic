@@ -21,6 +21,22 @@ See also `this recipe
 <https://atomistic-cookbook.org/examples/metatomic-plumed/metatomic-plumed.html>`_
 for more realistic, complex demonstrations.
 
+Experimental core API example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+An executable `water-hexamer example
+<https://github.com/EricBoittier/metatomic/tree/codex/plumed-core-api-docs/examples/plumed-water-hexamers>`_
+explores the forthcoming core API using pinned development sources. It includes
+analytic CV position/strain derivatives, short ASE biased dynamics, a book/prism
+CV scan, trajectory plots, and NumPy/PyTorch/JAX tests through PLUMED.
+
+This is a draft for the new interface, separate from the released TorchScript
+workflow described below. The Python backend tests use a test-only C ABI adapter
+because the pinned revision has no production Python model loader. The example
+documents the feature-gradient consistency-validator limitation and the limits
+of interpreting a short CV scan as an isomer conversion. Its build recipe is
+currently macOS-specific.
+
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -1,0 +1,6 @@
+isomer     oxygen Rg / A    mean oxygen coordination
+prism      2.15402067      2.45883173
+cage       2.24912019      2.39290434
+book       2.46910220      2.04322670
+ring       2.69471460      1.69546472
+PASS: all PLUMED values agree with independent Python within 1e-8.
