@@ -188,3 +188,71 @@ the legacy engine's backward pass, and compare the pure model's non-conservative
 outputs using the same random seed in both engines::
 
     python -m pytest regtests/tests/legacy_wrapper.py --import-mode=append
+
+Evaluating energies, forces, and stress
+---------------------------------------
+
+For a periodic system, request both derivatives in one call. This uses the model's
+length unit for the input arrays; the energy unit below is eV.
+
+.. code-block:: python
+
+    import numpy as np
+
+    request = metatomic.Quantity(
+        name="energy", unit="eV", sample_kind="system",
+        gradients=["positions", "strain"],
+    )
+    system = system_with_pairs(
+        types, positions, cell, pbc,
+        model.requested_pair_lists([request]),
+        length_unit=model.capabilities().length_unit,
+        model_length_unit=model.capabilities().length_unit,
+    )
+    (energy,) = metatomic.execute_model(
+        model, [system], [request], check_consistency=True
+    )
+    block = energy.block()
+    positions_gradient = block.gradient("positions")
+    forces = np.empty((len(types), 3))
+    forces[positions_gradient.samples.column("atom")] = (
+        -np.asarray(positions_gradient.values)[:, :, 0]
+    )
+    strain_gradient = np.asarray(block.gradient("strain").values)[0, :, :, 0]
+    stress = strain_gradient / abs(np.linalg.det(cell))
+
+The indexing above applies to one system, one energy property, and gradients for
+all atoms. For batches or selected atoms, use the ``system`` and ``atom`` columns
+of the gradient samples to associate rows with their structures. Do not assume
+that model output rows follow input atom order.
+
+Forces are the negative positions gradient. Stress is the strain gradient divided
+by volume, with the same sign convention as ASE; pressure has the opposite sign.
+For non-periodic structures or a zero-volume cell, the volume-normalized stress
+in this example is not defined. Rebuild pair lists when changing coordinates or
+cell vectors unless your engine implements a valid neighbor-list update scheme.
+
+Checking a migrated model
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Start with ``check_consistency=True`` and compare energy, force, and stress values
+with the existing engine on the same structure, dtype, units, and selected atoms.
+A finite-difference check on a few coordinates also checks the gradient path
+independently of the engine. Rebuild pair lists for each displaced structure and
+avoid crossing the model's cutoff discontinuity.
+
+If a model returns explicit gradients, their metadata must satisfy the new core
+schema. In particular, positions gradients of system energies need samples named
+``["sample", "system", "atom"]``. The wrapper preserves supplied gradient
+metadata; it does not repair a model's gradient labels automatically.
+
+If loading a saved model fails because of a missing custom operator, pass its
+extension directory to ``LegacyModel.load``. If a model declares an empty length
+unit, provide its actual unit using ``length_unit``. An override cannot reinterpret
+an already declared model unit without changing the model's parameters.
+
+The companion `Atomistic Cookbook recipe
+<https://github.com/lab-cosmo/atomistic-cookbook/pull/313>`_, *Running a legacy
+potential with TorchModel*, exports a small LJ model, reloads it, compares its derivatives with
+the legacy ASE engine, and checks a force using finite differences. It uses the
+same wrapper revision and requires no trained-model download.
