@@ -38,6 +38,8 @@ jobs:
           - os: windows-2022
             python-version: "3.14"
             torch-version: "2.13"
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -87,7 +89,9 @@ jobs:
             coverage combine .tox/*/.coverage
             coverage xml
 
+      # Forks may have no Codecov credentials; tests and coverage still run.
       - name: upload to codecov.io
+        if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
