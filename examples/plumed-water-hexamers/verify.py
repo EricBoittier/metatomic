@@ -22,7 +22,7 @@ if __name__ == "__main__":
     rows = [list(map(float, line.split())) for line in Path("COLVAR").read_text().splitlines()
             if line.strip() and not line.startswith("#")]
     expected = list(references())
-    assert len(rows) == len(expected) == 4
+    assert len(rows) == len(expected)
     print("isomer     oxygen Rg / A    mean oxygen coordination")
     for row, (name, rg, cn) in zip(rows, expected):
         assert len(row) == 3, row

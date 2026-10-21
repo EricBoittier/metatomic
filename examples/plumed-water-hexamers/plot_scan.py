@@ -10,6 +10,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 from ase.io import read
 from ase.visualize.plot import plot_atoms
 from ase.utils import rotate
+from analyze_sampling import analyze, plot_summary, pca_axes, histogram_axes
 
 
 def aligned_frames(frames):
@@ -65,19 +66,33 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('directory',type=Path,nargs='?',default=Path('cv-scan'))
     args=parser.parse_args();out=args.directory
     frames=read(out/'trajectory.traj',':');aligned=aligned_frames(frames)
-    structural=np.loadtxt(out/'oxygen-rmsd.csv',delimiter=',',skiprows=1)
+    sampling=analyze(out)
+    plot_summary(out,sampling)
+    structural=np.column_stack([sampling['time']*1000,sampling['rmsd']])
     data=np.loadtxt(out/'observables.csv',delimiter=',',skiprows=1)
-    names=['prism','cage','book','ring']
+    names=sampling['names']
+    gallery=list(sampling['refs'].values())
+    fig,axes=plt.subplots(3,3,figsize=(10,10),layout='constrained')
+    for ax,name,a in zip(axes.flat,names,gallery):
+        draw_atoms(ax,aligned_frames([a])[0]);ax.set_title(name)
+    fig.suptitle('Source conformations · before TIP3P relaxation')
+    fig.savefig(out/'reference-gallery.png',dpi=150);plt.close(fig)
     chosen=np.linspace(0,len(frames)-1,6).astype(int)
     fig,axes=plt.subplots(2,3,figsize=(11,7),layout='constrained')
     for ax,idx in zip(axes.flat,chosen):
         hb=draw_atoms(ax,aligned[idx]);f=frames[idx]
         distances=structural[idx,1:];nearest=names[np.argmin(distances)]
         ax.set_title(f'{f.info["time_fs"]/1000:.2f} ps  |  Rg {f.info["rg"]:.2f} Å\n'
-                     f'nearest O geometry: {nearest} ({min(distances):.2f} Å RMSD)',fontsize=10)
+                     f'nearest source O geometry: {nearest} ({min(distances):.2f} Å RMSD)',fontsize=10)
     fig.suptitle('Book → prism-target → book-target CV scan\nASE plot_atoms • rigid TIP3P • dashed lines: geometric H bonds',fontsize=14)
     fig.savefig(out/'ase-storyboard.png',dpi=180);plt.close(fig)
-    fig,(ax,cvax)=plt.subplots(1,2,figsize=(10,4.7),gridspec_kw={'width_ratios':[1,1.2]},layout='constrained')
+    fig,axes=plt.subplots(2,2,figsize=(11,8.5),layout='constrained')
+    ax,cvax,pcaax,histax=axes.flat
+    pca_axes(pcaax,sampling)
+    mesh=histogram_axes(histax,sampling)
+    fig.colorbar(mesh,ax=histax,label='Saved-frame fraction')
+    pc_marker,=pcaax.plot([],[],'o',color='#00bfff',mec='black',ms=8,zorder=5)
+    cv_marker,=histax.plot([],[],'o',color='#00bfff',mec='black',ms=8,zorder=5)
     cvax.plot(data[:,0]/1000,data[:,1],color='#ce473b',label='Rg')
     cvax.plot(data[:,0]/1000,data[:,3],'k--',lw=1,label='moving target')
     cvax.set(xlabel='Time (ps)',ylabel='Oxygen Rg (Å)');cvax.legend(frameon=False)
@@ -86,7 +101,9 @@ def main():
     def draw(idx):
         draw_atoms(ax,aligned[idx]);f=frames[idx];t=f.info['time_fs']/1000
         marker.set_xdata([t,t]);nearest=names[np.argmin(structural[idx,1:])]
-        title.set_text(f'ASE plot_atoms • {t:.2f} ps • closest oxygen geometry: {nearest}')
+        pc_marker.set_data([sampling['points'][idx,0]],[sampling['points'][idx,1]])
+        cv_marker.set_data([sampling['cv'][idx,0]],[sampling['cv'][idx,1]])
+        title.set_text(f'ASE plot_atoms • {t:.2f} ps • nearest source O geometry: {nearest}')
     indices=list(range(0,len(frames),max(1,len(frames)//100)))
     if indices[-1]!=len(frames)-1:indices.append(len(frames)-1)
     animation=FuncAnimation(fig,draw,frames=indices,interval=100)
@@ -98,9 +115,9 @@ def main():
         ax.plot(data[:,0]/1000,data[:,target],'k--',label='target')
         ax.set_ylabel(label);ax.legend(frameon=False)
     for i,name in enumerate(names):axes[2].plot(structural[:,0]/1000,structural[:,i+1],label=name)
-    axes[2].set(xlabel='Time (ps)',ylabel='Oxygen RMSD (Å)');axes[2].legend(ncol=4,frameon=False)
+    axes[2].set(xlabel='Time (ps)',ylabel='Oxygen RMSD (Å)');axes[2].legend(ncol=3,frameon=False)
     fig.savefig(out/'scan-diagnostics.png',dpi=180);plt.close(fig)
-    print('Saved ASE storyboard, animated GIF, and CV/geometry diagnostics.')
+    print('Saved reference gallery, ASE storyboard, four-panel GIF, sampling maps and diagnostics.')
 
 
 if __name__=='__main__':main()

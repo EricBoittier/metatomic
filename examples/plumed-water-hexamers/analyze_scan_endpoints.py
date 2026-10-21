@@ -30,7 +30,7 @@ def main():
     out=parser.parse_args().directory
     summary=json.loads((out/'summary.json').read_text())
     frames=read(out/'trajectory.traj',':')
-    names=['prism','cage','book','ring']
+    names=list(summary['reference_CVs'])
     refs={n:read(out/f'{n}-reference.extxyz') for n in names}
     graphs={n:hb_graph(a) for n,a in refs.items()}
     results={}

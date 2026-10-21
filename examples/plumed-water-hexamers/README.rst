@@ -2,22 +2,23 @@ Water hexamers through the metatomic core API
 ============================================
 
 This example evaluates two analytic collective variables on prism, cage, book,
-and ring water hexamers (18 atoms each). It loads a C++ plugin through the
+ring, bag, chair, a second book, and two boat water hexamers (18 atoms each). It loads a C++ plugin through the
 metatomic core API. It does not use TorchScript or a trained potential.
 
 This is an experimental documentation draft for the new core API. The build
 instructions below target macOS and exact development revisions, not the
-released TorchScript interface. Generated trajectories and figures are not
-committed; the scripts reproduce them.
+released TorchScript interface. Generated trajectories are not committed; the scripts reproduce them.
+Selected rendered figures are included in the PLUMED documentation.
 
 After completing the source build below, run from this directory::
 
     sh run.sh
 
 The source-built PLUMED writes ``COLVAR`` and ``driver.log``. ``verify.py``
-compares all eight CV values against independent Python calculations, with
+compares all eighteen CV values against independent Python calculations, with
 an absolute tolerance of 1e-8. The first COLVAR column is a frame time/index,
-not a physical MD trajectory. Frames are prism, cage, book, ring, in that order.
+not a physical MD trajectory. Frames are prism, cage, book, ring, bag, chair, book-2, boat-1 and boat-2,
+in that order.
 
 Descriptors
 -----------
@@ -59,7 +60,7 @@ selects the source-built kernel, which links to the pinned metatomic core.
 
 ``check_gradients.py`` compares PLUMED bias forces and virial against central
 finite differences of its bias energy, E = CV^2/2, with displacement 1e-5 A and
-strain increment 1e-5. It checks both CVs on all four hexamers, all 54 Cartesian
+strain increment 1e-5. It checks both CVs on all nine hexamers, all 54 Cartesian
 coordinates and all nine strain components. This exercises the plugin gradient
 layout, core execution, PLUMED force contraction, unit conversion, and virial
 sign. A repeat evaluation with PLUMED length units set to nanometers verifies
@@ -114,7 +115,7 @@ Pinned source and build
 The metatomic source is unchanged. ``plumed-core-api.patch`` adapts two calls
 in the PLUMED fork to this core revision's argument-free ``requested_inputs``
 and ``requested_pair_lists`` methods. ``Cargo.lock.pinned`` preserves the
-existing local checkout's dependency resolution, including yanked zip 8.6.0,
+existing local checkout's dependency resolution, including zip 8.6.0 (temporarily yanked when the initial CI ran),
 which Cargo can still build from a lockfile.
 
 ``PLUGIN_LIBRARY`` is specified only on the first METATOMIC action: loading
@@ -214,3 +215,59 @@ API and the same pinned core. They cover values, biased forces, position and
 strain derivatives, units, model lifetime and errors. The pinned revision
 requires a test-only Python C ABI adapter; this does not test a production
 Python model loader. See ``tests/README.rst`` for setup and coverage details.
+
+
+Expanded reference library and visited regions
+---------------------------------------------
+
+``conformations.py`` reads labels directly from XYZ comments, so the driver,
+gradient checks, scan and analysis share the same nine-reference library.
+The five additions (bag, chair, book-2, boat-1 and boat-2) are taken from the
+ForceBalance Interactions_CCSDT dataset at commit
+``446533fc6b1f45b3d498f0fc5477283efce43ff6``:
+https://github.com/leucinw/forcebalance-1.3.2/tree/446533fc6b1f45b3d498f0fc5477283efce43ff6/studies/015_amoeba_tinker/targets/Interactions_CCSDT/convert
+
+The upstream XYZ comments attribute these geometries to Dahlke and Truhlar,
+JPCA 2008. Original files, comments, SHA-256 digests and the atom-order mapping
+are preserved in ``references/``. Only atom order changes when appending to
+``hexamers.xyz``: each hydrogen is assigned to its nearest oxygen to produce
+six OHH groups. Coordinates remain in angstrom without rounding or optimization.
+The original four i-PI references remain unchanged. Ring and chair are retained
+as separately sourced structures, not asserted to represent distinct basins.
+
+``plot_scan.py`` now renders a nine-conformation ASE gallery and a four-panel
+animation: atoms, Rg/time, PCA and a CV visitation histogram with synchronized
+current-frame markers. ``analyze_sampling.py`` can independently regenerate
+``sampling-regions.png``, ``sampling-pca.csv``, ``sampling-map.npz`` and
+``sampling-summary.json`` from an existing trajectory::
+
+    python analyze_sampling.py cv-scan
+    python plot_scan.py cv-scan
+
+PCA uses the 15 sorted O–O distances, in angstrom, centered without scaling.
+It is fitted only to the trajectory; source references are projected afterward.
+The distance descriptor is invariant to translation, rotation and oxygen
+permutation, but loses connectivity and proton ordering. Explained variance,
+centering vector and components are exported. The first two components explain
+68.7% and 20.9% of the original 201-frame scan's variance.
+
+The 24-by-24 Rg/coordination histogram reports fractions of saved frames per bin.
+The reference bar chart counts the nearest source oxygen geometry only if its
+permutation-minimized RMSD is at most 0.35 A; other frames are unassigned. This
+illustrative threshold is not a validated basin boundary. These are descriptive
+counts from a short driven trajectory, not equilibrium populations, a free-energy
+surface, or evidence of visiting every reference conformation.
+
+The gallery, PCA and sampling charts compare against **unrelaxed source
+references**, preserving the published labels even if TIP3P relaxation changes
+a structure. The scan's ``oxygen-rmsd.csv`` and endpoint analysis instead compare
+against its **TIP3P-relaxed references**. These reference sets are intentionally
+reported separately; the updated plots do not overwrite the original scan report.
+
+A kernel-independent CI job checks provenance, OHH grouping, rigid-motion and
+permutation invariance, trajectory-only PCA fitting and histogram normalization::
+
+    python -m pytest analysis_tests -q
+
+The native NumPy/PyTorch/JAX suite remains a separate source-build test, run with
+``sh test-backends.sh -q``.

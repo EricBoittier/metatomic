@@ -1,0 +1,16 @@
+name: PLUMED example analysis
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r examples/plumed-water-hexamers/python-requirements.txt pytest
+      - name: Check reference data and trajectory analysis (no native kernel required)
+        run: python -m pytest examples/plumed-water-hexamers/analysis_tests -q

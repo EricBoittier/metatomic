@@ -37,6 +37,41 @@ documents the feature-gradient consistency-validator limitation and the limits
 of interpreting a short CV scan as an isomer conversion. Its build recipe is
 currently macOS-specific.
 
+The example includes nine reference conformations: prism, cage, book, ring,
+bag, chair, book-2, boat-1 and boat-2. These source geometries are shown before
+TIP3P relaxation; similar oxygen geometries need not have identical proton order.
+
+.. figure:: plumed-core-figures/reference-gallery.png
+   :alt: ASE atom plots of nine water hexamer reference conformations
+   :width: 85%
+
+   Source conformations. Original coordinates and provenance are included with
+   the example; atom order is normalized to six OHH groups.
+
+.. figure:: plumed-core-figures/ase-trajectory.gif
+   :alt: Synchronized atom trajectory, Rg time series, oxygen-distance PCA and visited CV histogram
+   :width: 100%
+
+   Original 2 ps book-to-prism-target-to-book-target biased trajectory,
+   reanalyzed against the expanded reference set. Blue markers follow the
+   current frame. The PCA and histogram use the whole saved trajectory.
+
+.. figure:: plumed-core-figures/sampling-regions.png
+   :alt: PCA projection, CV visitation histogram, nearest-reference fractions and oxygen RMSD histories
+   :width: 100%
+
+   Descriptive coverage of 201 saved frames. PCA is fitted to centered, unscaled,
+   sorted O–O distances from the trajectory only; source references are projected
+   afterward. PC1 and PC2 explain 68.7% and 20.9% of the variance. Histogram bins
+   show fractions of saved frames, not equilibrium probabilities. The nearest
+   reference count uses an illustrative 0.35 angstrom oxygen RMSD cutoff and
+   leaves more distant frames unassigned. Neither projection identifies proton
+   ordering or establishes a free-energy surface.
+
+Download the :download:`projected trajectory and reference RMSDs
+<plumed-core-figures/sampling-pca.csv>` and :download:`analysis metadata
+<plumed-core-figures/sampling-summary.json>`.
+
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 

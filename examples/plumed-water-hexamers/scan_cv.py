@@ -15,6 +15,7 @@ from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import thermalize_momenta
 from bias_utils import HERE, KERNEL, cv_input
 from run_md import descriptors
+from conformations import load_conformations
 
 PAIRS = [(i+a,i+b) for i in range(0,18,3) for a,b in ((0,1),(0,2),(1,2))]
 PERMUTATIONS = np.array(list(itertools.permutations(range(6))))
@@ -57,9 +58,9 @@ def main():
     parser.add_argument('--hold-steps',type=int,default=400)
     args=parser.parse_args()
     out=args.output.resolve(); out.mkdir(exist_ok=False,parents=True)
-    raw=read(HERE/'hexamers.xyz',':')
-    names=['prism','cage','book','ring']
-    refs={name:prepare(a,out/f'relax-{name}.log') for name,a in zip(names,raw)}
+    raw=load_conformations()
+    names=list(raw)
+    refs={name:prepare(a,out/f'relax-{name}.log') for name,a in raw.items()}
     for name,a in refs.items(): write(out/f'{name}-reference.extxyz',a)
     endpoints={name:descriptors(a) for name,a in refs.items()}
     print('Relaxed reference CVs:',endpoints,flush=True)

@@ -2,17 +2,18 @@
 import json
 from pathlib import Path
 import numpy as np
-from ase.io import read
+from conformations import load_conformations
 from bias_utils import HERE, BiasProbe
 
 out = HERE / 'gradient-checks'
 out.mkdir(exist_ok=True)
-frames = read(HERE / 'hexamers.xyz', ':')
+refs = load_conformations()
+frames = list(refs.values())
 report = []
 h = 1e-5
 for cv in ('rg', 'cn'):
     probe = BiasProbe(cv, out / f'{cv}.log')
-    for name, atoms in zip(('prism', 'cage', 'book', 'ring'), frames):
+    for name, atoms in refs.items():
         p = atoms.positions
         energy, force, virial = probe.evaluate(p)
         fd_force = np.zeros_like(p)
@@ -55,4 +56,4 @@ for cv in ('rg', 'cn'):
     other.close()
     probe.close()
 (out / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
-print('PASS: both CVs, all four isomers, all 54 coordinates and all 9 strain components.')
+print('PASS: both CVs, all reference isomers, all 54 coordinates and all 9 strain components.')
