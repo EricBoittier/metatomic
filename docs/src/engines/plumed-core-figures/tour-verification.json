@@ -1,0 +1,71 @@
+{
+  "visits": [
+    {
+      "name": "book",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "book-2",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "bag",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "cage",
+      "matching_frames": 9,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 8,
+      "passed": true
+    },
+    {
+      "name": "prism",
+      "matching_frames": 10,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 7,
+      "passed": true
+    },
+    {
+      "name": "boat-1",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "boat-2",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "chair",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    },
+    {
+      "name": "ring",
+      "matching_frames": 11,
+      "checked_frames": 11,
+      "longest_consecutive_frames": 11,
+      "passed": true
+    }
+  ],
+  "all_visited": true,
+  "max_bond_error_A": 1.5143442055887135e-12,
+  "max_oxygen_diameter_A": 5.703979319596369,
+  "max_bias_energy_error_eV": 8.526512829121202e-13
+}

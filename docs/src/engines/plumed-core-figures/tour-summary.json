@@ -1,0 +1,98 @@
+{
+  "metatomic_commit": "b02b9ff3df6458cca21fa8690d229bbda97e6f78",
+  "parameters": {
+    "ramp": 400,
+    "hold": 400,
+    "kappa": 2000.0,
+    "temperature": 200.0,
+    "dt": 0.5,
+    "max_seconds": 400.0
+  },
+  "visits": [
+    {
+      "name": "book",
+      "step": 400,
+      "time_fs": 200.0,
+      "all_atom_rmsd_A": 0.01373388787617949,
+      "oxygen_rmsd_A": 0.0074364950549503615,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "book-2",
+      "step": 1200,
+      "time_fs": 600.0,
+      "all_atom_rmsd_A": 0.013311165464498216,
+      "oxygen_rmsd_A": 0.012377124240111033,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "bag",
+      "step": 2000,
+      "time_fs": 1000.0,
+      "all_atom_rmsd_A": 0.013268501229278324,
+      "oxygen_rmsd_A": 0.011504407366106187,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "cage",
+      "step": 2800,
+      "time_fs": 1400.0,
+      "all_atom_rmsd_A": 0.014783269252202864,
+      "oxygen_rmsd_A": 0.012895040407593695,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "prism",
+      "step": 3600,
+      "time_fs": 1800.0,
+      "all_atom_rmsd_A": 0.014501988604293541,
+      "oxygen_rmsd_A": 0.011598198041733515,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "boat-1",
+      "step": 4400,
+      "time_fs": 2200.0,
+      "all_atom_rmsd_A": 0.014993886177233798,
+      "oxygen_rmsd_A": 0.01706549130842631,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "boat-2",
+      "step": 5200,
+      "time_fs": 2600.0,
+      "all_atom_rmsd_A": 0.01566022990343296,
+      "oxygen_rmsd_A": 0.013869017419726577,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "chair",
+      "step": 6000,
+      "time_fs": 3000.0,
+      "all_atom_rmsd_A": 0.015127650295714327,
+      "oxygen_rmsd_A": 0.012100567030214162,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "ring",
+      "step": 6800,
+      "time_fs": 3400.0,
+      "all_atom_rmsd_A": 0.016774494379503953,
+      "oxygen_rmsd_A": 0.014731460465846394,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    }
+  ],
+  "all_visited": true,
+  "elapsed_seconds": 308.729269250005,
+  "interpretation": "Driven template tour, not equilibrium sampling or spontaneous transitions. Fixed molecule labels; proper-rotation all-atom RMSD to rigidified templates, permutation-invariant O RMSD to original sources, directed hydrogen bonds to rigidified templates.",
+  "host": "Apple M1 Pro, macOS"
+}

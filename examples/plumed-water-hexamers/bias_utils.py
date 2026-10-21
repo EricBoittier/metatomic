@@ -23,7 +23,7 @@ def cv_input(length_unit="A"):
 
 
 class BiasProbe:
-    def __init__(self, cv, logfile, length_unit="A"):
+    def __init__(self, cv, logfile, length_unit="A", extra_input=()):
         from plumed import Plumed
         from ase import units
         self.plumed = Plumed(kernel=str(KERNEL))
@@ -34,7 +34,7 @@ class BiasProbe:
                             ('setLogFile', str(logfile)), ('setTimestep', 1.0)]:
             self.plumed.cmd(name, value)
         self.plumed.cmd('init')
-        for line in cv_input(length_unit) + [f'bias: RESTRAINT ARG={cv} AT=0 KAPPA=1']:
+        for line in cv_input(length_unit) + list(extra_input) + [f'bias: RESTRAINT ARG={cv} AT=0 KAPPA=1']:
             self.plumed.cmd('readInputLine', line)
         self.step = 0
 

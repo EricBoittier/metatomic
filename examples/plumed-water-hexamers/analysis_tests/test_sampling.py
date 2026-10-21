@@ -87,3 +87,26 @@ def test_sampling_counts_and_reference_dimensions(tmp_path):
     np.testing.assert_allclose(result["fractions"].sum(), 1)
     assert result["fractions"][-1] == 0
     assert (tmp_path / "sampling-pca.csv").exists()
+
+
+def test_tour_template_mapping_preserves_geometry_and_rigid_water():
+    from ase.calculators.tip3p import rOH
+    from tour_cv import ORDER, full_rmsd, map_reference, rigid_reference
+
+    refs = load_conformations()
+    previous = rigid_reference(refs[ORDER[0]])
+    for name in ORDER:
+        target = rigid_reference(refs[name])
+        mapped = map_reference(target, previous)
+        assert oxygen_rmsd(mapped, target) < 1e-10
+        p = mapped.positions.reshape(6, 3, 3)
+        np.testing.assert_allclose(np.linalg.norm(p[:, 1:] - p[:, :1], axis=2), rOH)
+        changed = mapped.copy()
+        changed.rotate(43, "y")
+        changed.translate([1, -2, 3])
+        assert full_rmsd(changed, mapped) < 1e-10
+        previous = mapped
+    # Proper rotations must not accept the mirror image of this labeled target.
+    mirrored = previous.copy()
+    mirrored.positions[:, 0] *= -1
+    assert full_rmsd(mirrored, previous) > 0.15

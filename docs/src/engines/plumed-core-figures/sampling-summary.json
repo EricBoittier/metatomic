@@ -1,8 +1,8 @@
 {
-  "frames": 201,
+  "frames": 681,
   "time_range_ps": [
     0.0,
-    2.0
+    3.4
   ],
   "reference_names": [
     "prism",
@@ -18,21 +18,21 @@
   "reference_kind": "unrelaxed source geometries",
   "pca_features": "15 sorted oxygen pair distances in angstrom; centered, unscaled; trajectory-only fit",
   "explained_variance_ratio": [
-    0.6867479949293768,
-    0.20926618465282396
+    0.843050430493701,
+    0.08476412961283546
   ],
   "rmsd_threshold_A": 0.35,
   "nearest_reference_frame_fraction": {
-    "prism": 0.3582089552238806,
-    "cage": 0.0,
-    "book": 0.12935323383084577,
-    "ring": 0.0,
-    "bag": 0.0,
-    "chair": 0.0,
-    "book-2": 0.06965174129353234,
-    "boat-1": 0.0,
-    "boat-2": 0.0,
-    "unassigned": 0.4427860696517413
+    "prism": 0.10572687224669604,
+    "cage": 0.1027900146842878,
+    "book": 0.08663729809104258,
+    "ring": 0.09691629955947137,
+    "bag": 0.10572687224669604,
+    "chair": 0.10719530102790015,
+    "book-2": 0.1130690161527166,
+    "boat-1": 0.13656387665198239,
+    "boat-2": 0.08957415565345081,
+    "unassigned": 0.055800293685756244
   },
   "interpretation": "Biased nonequilibrium saved-frame frequencies, not equilibrium populations. Oxygen geometry ignores proton order; sorted distances are not unique."
 }

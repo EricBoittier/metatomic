@@ -1,6 +1,7 @@
 // Analytic nonperiodic hexamer CVs with position and homogeneous-strain gradients.
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <metatomic.hpp>
 
 namespace mta = metatomic;
@@ -9,6 +10,22 @@ namespace mts = metatensor;
 class Hexamer final: public mta::BaseModel {
 public:
     explicit Hexamer(bool coordination): coordination_(coordination) {}
+
+    explicit Hexamer(const std::string& path): coordination_(false) {
+        std::ifstream file(path);
+        size_t count = 0;
+        file >> count;
+        if (count != 18) throw mta::Error("Target must contain 18 atoms");
+        std::string line;
+        std::getline(file, line); std::getline(file, line);
+        for (size_t i = 0; i < count; ++i) {
+            std::string symbol;
+            std::array<double, 3> r;
+            if (!(file >> symbol >> r[0] >> r[1] >> r[2])) throw mta::Error("Invalid target XYZ");
+            if (symbol != (i % 3 == 0 ? "O" : "H")) throw mta::Error("Target requires OHH order");
+            reference_.push_back(r);
+        }
+    }
 
     mta::ModelCapabilities capabilities() const override {
         return mta::ModelCapabilities::builder()
@@ -22,7 +39,7 @@ public:
     }
     mta::ModelMetadata metadata() const override {
         return mta::ModelMetadata::builder()
-            .name(coordination_ ? "Mean oxygen coordination" : "Oxygen radius of gyration")
+            .name(!reference_.empty() ? "Aligned all-atom RMSD" : (coordination_ ? "Mean oxygen coordination" : "Oxygen radius of gyration"))
             .description("Analytic nonperiodic hexamer descriptor with analytic gradients")
             .build();
     }
@@ -55,7 +72,7 @@ public:
                 std::vector<std::array<double, 3>> oxygen;
                 std::vector<size_t> oxygen_ids;
                 for (size_t i = 0; i < system.size(); ++i) {
-                    if (z[i * (t.strides ? t.strides[0] : 1)] == 8) {
+                    if (!reference_.empty() || z[i * (t.strides ? t.strides[0] : 1)] == 8) {
                         std::array<double, 3> r;
                         for (size_t k = 0; k < 3; ++k) {
                             r[k] = xyz[i * (p.strides ? p.strides[0] : 3) + k * (p.strides ? p.strides[1] : 1)];
@@ -64,7 +81,7 @@ public:
                         oxygen_ids.push_back(i);
                     }
                 }
-                if (oxygen.size() != 6) throw mta::Error("Expected six oxygen atoms");
+                if (oxygen.size() != (reference_.empty() ? 6 : 18)) throw mta::Error("Unexpected atom count");
                 // This core revision requires a finite interaction range.
                 for (const auto& a: oxygen) for (const auto& b: oxygen) {
                     double r2 = 0;
@@ -72,8 +89,71 @@ public:
                     if (r2 > 100.0 * 100.0) throw mta::Error("Cluster exceeds the 100 A supported diameter");
                 }
                 double value = 0;
-                std::array<std::array<double, 3>, 6> gradient{};
-                if (coordination_) {
+                std::vector<std::array<double, 3>> gradient(oxygen.size());
+                if (!reference_.empty()) {
+                    // Optimal proper rotation from Horn's quaternion matrix.
+                    // A symmetric Jacobi eigensolver avoids an external linear algebra dependency.
+                    std::array<double, 3> center{}, target_center{};
+                    for (size_t i = 0; i < 18; ++i) for (size_t k = 0; k < 3; ++k) {
+                        center[k] += oxygen[i][k] / 18.0;
+                        target_center[k] += reference_[i][k] / 18.0;
+                    }
+                    double h[3][3] = {};
+                    for (size_t i = 0; i < 18; ++i) for (size_t a = 0; a < 3; ++a)
+                        for (size_t b = 0; b < 3; ++b)
+                            h[a][b] += (oxygen[i][a] - center[a]) * (reference_[i][b] - target_center[b]);
+                    double n[4][4] = {
+                        {h[0][0]+h[1][1]+h[2][2], h[1][2]-h[2][1], h[2][0]-h[0][2], h[0][1]-h[1][0]},
+                        {h[1][2]-h[2][1], h[0][0]-h[1][1]-h[2][2], h[0][1]+h[1][0], h[0][2]+h[2][0]},
+                        {h[2][0]-h[0][2], h[0][1]+h[1][0], -h[0][0]+h[1][1]-h[2][2], h[1][2]+h[2][1]},
+                        {h[0][1]-h[1][0], h[0][2]+h[2][0], h[1][2]+h[2][1], -h[0][0]-h[1][1]+h[2][2]}
+                    };
+                    double eigenvectors[4][4] = {};
+                    for (size_t i = 0; i < 4; ++i) eigenvectors[i][i] = 1.0;
+                    for (size_t iteration = 0; iteration < 100; ++iteration) {
+                        size_t a = 0, b = 1;
+                        for (size_t i = 0; i < 4; ++i) for (size_t j = i+1; j < 4; ++j)
+                            if (std::abs(n[i][j]) > std::abs(n[a][b])) { a=i; b=j; }
+                        if (std::abs(n[a][b]) < 1e-13) break;
+                        const double theta = 0.5 * std::atan2(2*n[a][b], n[b][b]-n[a][a]);
+                        const double c = std::cos(theta), t = std::sin(theta);
+                        const double aa=n[a][a], bb=n[b][b], ab=n[a][b];
+                        n[a][a]=c*c*aa-2*c*t*ab+t*t*bb;
+                        n[b][b]=t*t*aa+2*c*t*ab+c*c*bb;
+                        n[a][b]=n[b][a]=0;
+                        for (size_t k = 0; k < 4; ++k) {
+                            if (k != a && k != b) {
+                                const double ka=n[k][a], kb=n[k][b];
+                                n[k][a]=n[a][k]=c*ka-t*kb;
+                                n[k][b]=n[b][k]=t*ka+c*kb;
+                            }
+                            const double va=eigenvectors[k][a], vb=eigenvectors[k][b];
+                            eigenvectors[k][a]=c*va-t*vb;
+                            eigenvectors[k][b]=t*va+c*vb;
+                        }
+                    }
+                    size_t largest = 0;
+                    for (size_t k = 1; k < 4; ++k) if (n[k][k] > n[largest][largest]) largest=k;
+                    const double w=eigenvectors[0][largest], x=eigenvectors[1][largest];
+                    const double y=eigenvectors[2][largest], zq=eigenvectors[3][largest];
+                    // Column-vector rotation mapping current coordinates to reference.
+                    const double rotation[3][3] = {
+                        {1-2*(y*y+zq*zq), 2*(x*y-zq*w), 2*(x*zq+y*w)},
+                        {2*(x*y+zq*w), 1-2*(x*x+zq*zq), 2*(y*zq-x*w)},
+                        {2*(x*zq-y*w), 2*(y*zq+x*w), 1-2*(x*x+y*y)}
+                    };
+                    for (size_t i = 0; i < 18; ++i) for (size_t a = 0; a < 3; ++a) {
+                        double target = 0;
+                        for (size_t b = 0; b < 3; ++b)
+                            target += rotation[b][a] * (reference_[i][b] - target_center[b]);
+                        const double delta = oxygen[i][a] - center[a] - target;
+                        value += delta*delta / 18.0;
+                        gradient[i][a] = delta / 18.0;
+                    }
+                    value = std::sqrt(value + 1e-16);
+                    // Envelope theorem: the derivative of the optimal rotation cancels.
+                    for (auto& g: gradient) for (double& x: g) x /= value;
+                } else if (coordination_) {
                     for (size_t i = 0; i < 6; ++i) {
                         for (size_t j = i + 1; j < 6; ++j) {
                             double r2 = 0;
@@ -101,7 +181,7 @@ public:
                 const auto sample = static_cast<int32_t>(values.size());
                 std::vector<double> atom_gradients(3 * system.size(), 0.0);
                 std::array<double, 9> strain{};
-                for (size_t i = 0; i < 6; ++i) {
+                for (size_t i = 0; i < oxygen.size(); ++i) {
                     for (size_t k = 0; k < 3; ++k) atom_gradients[3 * oxygen_ids[i] + k] = gradient[i][k];
                     // r' = r F: dCV/dF_ab = sum_i r_ia dCV/dr_ib.
                     for (size_t a = 0; a < 3; ++a) for (size_t b = 0; b < 3; ++b)
@@ -143,9 +223,11 @@ public:
     }
 private:
     bool coordination_;
+    std::vector<std::array<double, 3>> reference_;
 };
 
 std::unique_ptr<mta::BaseModel> load_hexamer(const std::string& name, const std::map<std::string, std::string>&) {
+    if (name.rfind("rmsd-target:", 0) == 0) return std::make_unique<Hexamer>(name.substr(12));
     if (name == "oxygen-rg") return std::make_unique<Hexamer>(false);
     if (name == "oxygen-cn") return std::make_unique<Hexamer>(true);
     return nullptr;

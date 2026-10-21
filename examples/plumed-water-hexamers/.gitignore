@@ -8,3 +8,6 @@ gradient-checks/
 md-*/
 cv-scan/
 tests/report.xml
+
+cv-tour*/
+tour-trial*/

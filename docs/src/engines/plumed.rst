@@ -28,7 +28,8 @@ An executable `water-hexamer example
 <https://github.com/EricBoittier/metatomic/tree/codex/plumed-core-api-docs/examples/plumed-water-hexamers>`_
 explores the forthcoming core API using pinned development sources. It includes
 analytic CV position/strain derivatives, short ASE biased dynamics, a book/prism
-CV scan, trajectory plots, and NumPy/PyTorch/JAX tests through PLUMED.
+CV scan, a nine-template RMSD-driven tour, trajectory plots, and
+NumPy/PyTorch/JAX tests through PLUMED.
 
 This is a draft for the new interface, separate from the released TorchScript
 workflow described below. The Python backend tests use a test-only C ABI adapter
@@ -49,28 +50,46 @@ TIP3P relaxation; similar oxygen geometries need not have identical proton order
    the example; atom order is normalized to six OHH groups.
 
 .. figure:: plumed-core-figures/ase-trajectory.gif
-   :alt: Synchronized atom trajectory, Rg time series, oxygen-distance PCA and visited CV histogram
+   :alt: Synchronized atom trajectory, target RMSD time series, oxygen-distance PCA and visited CV histogram
    :width: 100%
 
-   Original 2 ps book-to-prism-target-to-book-target biased trajectory,
-   reanalyzed against the expanded reference set. Blue markers follow the
-   current frame. The PCA and histogram use the whole saved trajectory.
+   Continuous 3.4 ps targeted MD tour of all nine reference templates at 200 K.
+   The aligned all-atom RMSD CVs include hydrogen positions and exclude
+   reflections. Blue markers follow the current frame; the PCA and histogram
+   use the whole saved trajectory. These are driven visits, not spontaneous
+   transitions or equilibrium populations.
 
 .. figure:: plumed-core-figures/sampling-regions.png
    :alt: PCA projection, CV visitation histogram, nearest-reference fractions and oxygen RMSD histories
    :width: 100%
 
-   Descriptive coverage of 201 saved frames. PCA is fitted to centered, unscaled,
+   Descriptive coverage of 681 saved frames. PCA is fitted to centered, unscaled,
    sorted O–O distances from the trajectory only; source references are projected
-   afterward. PC1 and PC2 explain 68.7% and 20.9% of the variance. Histogram bins
-   show fractions of saved frames, not equilibrium probabilities. The nearest
-   reference count uses an illustrative 0.35 angstrom oxygen RMSD cutoff and
-   leaves more distant frames unassigned. Neither projection identifies proton
-   ordering or establishes a free-energy surface.
+   afterward. Histogram bins show fractions of saved frames, not equilibrium
+   probabilities. The nearest reference count uses an illustrative 0.35 angstrom
+   oxygen RMSD cutoff and leaves more distant frames unassigned. Neither
+   projection identifies proton ordering or establishes a free-energy surface.
+
+.. figure:: plumed-core-figures/ase-storyboard.png
+   :alt: Actual trajectory frames at the end of all nine target holds
+   :width: 100%
+
+   Actual hold-end frames. A separate audit requires all-atom RMSD below
+   0.15 angstrom, source oxygen RMSD below 0.15 angstrom, and matching directed
+   hydrogen bonds for at least three consecutive saved frames at every target.
+   Ring and chair are separate source templates, not claimed distinct basins.
 
 Download the :download:`projected trajectory and reference RMSDs
 <plumed-core-figures/sampling-pca.csv>` and :download:`analysis metadata
-<plumed-core-figures/sampling-summary.json>`.
+<plumed-core-figures/sampling-summary.json>`, the :download:`visit audit
+<plumed-core-figures/tour-verification.json>` and :download:`measured timings
+<plumed-core-figures/tour-runtime.json>`. After the pinned source build,
+``sh run-tour.sh cv-tour`` runs checks, MD and plots with a hard eight-minute
+wall-clock limit. The build itself is outside this budget. The included run
+took 369 seconds end-to-end on an Apple M1 Pro (309 seconds for MD). All nine
+templates passed; hold-end all-atom RMSDs were 0.013–0.017 angstrom.
+The :download:`run parameters and endpoint measurements
+<plumed-core-figures/tour-summary.json>` are also available.
 
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^

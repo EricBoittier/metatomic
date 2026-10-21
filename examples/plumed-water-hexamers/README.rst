@@ -271,3 +271,82 @@ permutation invariance, trajectory-only PCA fitting and histogram normalization:
 
 The native NumPy/PyTorch/JAX suite remains a separate source-build test, run with
 ``sh test-backends.sh -q``.
+
+Nine-template targeted MD tour
+-----------------------------
+
+For a trajectory that deliberately visits all nine templates, rebuild the plugin
+and run the bounded pipeline::
+
+    sh build-plugin.sh
+    sh run-tour.sh cv-tour
+
+The existing pinned core and PLUMED source builds are required. The eight-minute
+budget applies to gradient checks, MD, saved-frame verification and rendering;
+installing dependencies or compiling the source stack is outside that budget.
+``run-tour.sh`` enforces a 480-second wall-clock timeout, exits unsuccessfully
+if verification fails, and writes measured timings to ``runtime.json``.
+Performance depends on the host. Output directories must not already exist.
+
+This replaces compactness steering with nine structure-specific CVs. For target
+``k``, the plugin calculates the all-atom RMSD after optimizing translation and proper rotation::
+
+    q_k = sqrt(min_{R in SO(3)} sum_i |(r_i - center) R
+               - (r_i,target_k - center_target_k)|^2 / 18 + 1e-16)
+    V_bias = K/2 * sum_k w_k(t) q_k^2
+
+Lengths are in angstrom. A quaternion eigensolver determines the optimal
+proper rotation; reflections are excluded. Gradients use the aligned displacement
+and the envelope theorem, including the centering correction. The regularizer
+makes the CV derivative defined at its minimum for nondegenerate alignments. The PLUMED feature output is numerically expressed in angstrom but,
+like the original Rg feature, declares an empty quantity unit at this pinned
+API revision. Position and homogeneous-strain gradients are analytic; hydrogens
+now contribute. ``check_rmsd_gradients.py`` checks every Cartesian and strain
+component for all nine targets through PLUMED, verifies the independently
+calculated bias, and repeats in nanometer units.
+
+The target XYZ path is supplied as ``MODEL=rmsd-target:/absolute/target.xyz``.
+Only the first METATOMIC action loads ``hexamer.dylib``; subsequent actions reuse
+the registered plugin. The core API, its pin, and the force propagation through
+PLUMED are unchanged.
+
+The sequence is book, book-2, bag, cage, prism, boat-1, boat-2, chair, ring.
+Each source template retains its oxygen positions; O-H distances and H-O-H angles
+are restored to rigid TIP3P geometry without minimizing the structure. Before MD,
+water labels and equivalent hydrogen labels are matched to the preceding target
+using proper rotations and whole-water geometry. These are fixed target label
+choices, not coordinate replacements during dynamics. The trajectory is one
+continuous integration with no resets, interpolated structures or restarts.
+
+Default settings are 200 K, 0.5 fs, Langevin friction 0.05/fs, K=2000 eV/A^2,
+400-step ramps and 400-step holds (6800 steps, 3.4 ps). The weights transfer
+linearly from the preceding target to the next. All intramolecular TIP3P distances
+and the center of mass are constrained. The strong, time-dependent restraint is
+intended to enforce a tour; it is not a physical transition pathway or evidence
+that the system spontaneously samples these structures.
+
+A visit requires proper-rotation all-atom RMSD below 0.15 A to the fixed labeled
+rigid template, oxygen RMSD below 0.15 A to the original source (minimized over
+oxygen permutations), and an identical directed geometric hydrogen-bond graph.
+``verify_tour.py`` requires at least three consecutive saved frames to meet all
+three conditions within the final 50 fs of each hold. It independently checks
+CVs, bias energies, rigid-bond errors and the TIP3P cutoff. The visit audit uses an independent NumPy SVD alignment, separate from the
+plugin quaternion eigensolver; both exclude reflections.
+Ring and chair remain separately sourced templates, not two claimed distinct
+free-energy basins. No claim is made that the driven structures remain stable
+after removing the restraint.
+
+``plot_tour.py`` produces the ASE atom animation, a nine-panel storyboard of
+actual hold-end frames, trajectory-fitted oxygen-distance PCA, and a visitation
+histogram. The PCA and histogram have the same limitations described above:
+they summarize the driven trajectory, not equilibrium populations or proton
+order. The stricter visit audit is saved separately in ``verification.json``.
+
+Measured result on an Apple M1 Pro (macOS): 308.7 seconds for MD and
+369.0 seconds for the complete checks/MD/verification/rendering pipeline. All
+nine targets passed the sustained-visit audit; each had 7–11 consecutive matching
+saved frames in its final 50 fs. Hold-end all-atom RMSDs were 0.013–0.017 A,
+with matching directed hydrogen-bond graphs. The maximum rigid-bond drift was
+1.6e-12 A. These results and timings are included alongside the documentation
+figures as ``tour-summary.json``, ``tour-verification.json`` and
+``tour-runtime.json``.
