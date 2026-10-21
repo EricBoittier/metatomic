@@ -77,8 +77,6 @@ filterwarnings = [
     # Warnings from warp (dependency of nvalchemi)
     "ignore:.*Structure will use memory layout compatible with MSVC:DeprecationWarning",
     "ignore:warp.config.quiet is deprecated:DeprecationWarning",
-    # Same upstream import alias deprecation as the TorchSim integration tests.
-    "ignore:The 'nvalchemiops.neighborlist' module has been renamed to 'nvalchemiops.neighbors':DeprecationWarning",
     # Warning in old version of torchsim
     "ignore:`vesin.torch` is deprecated and will be removed in a future release:DeprecationWarning"
 ]
