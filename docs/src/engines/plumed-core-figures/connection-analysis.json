@@ -1,0 +1,157 @@
+{
+  "connected_relaxed_references": [
+    "book",
+    "bag",
+    "cage",
+    "prism",
+    "boat-1",
+    "chair"
+  ],
+  "edges": [
+    {
+      "start": "book",
+      "end": "bag",
+      "start_fs": 200.0,
+      "end_fs": 600.0
+    },
+    {
+      "start": "bag",
+      "end": "cage",
+      "start_fs": 600.0,
+      "end_fs": 1000.0
+    },
+    {
+      "start": "cage",
+      "end": "prism",
+      "start_fs": 1000.0,
+      "end_fs": 1400.0
+    },
+    {
+      "start": "prism",
+      "end": "boat-1",
+      "start_fs": 1400.0,
+      "end_fs": 1800.0
+    },
+    {
+      "start": "boat-1",
+      "end": "chair",
+      "start_fs": 1800.0,
+      "end_fs": 2200.0
+    },
+    {
+      "start": "chair",
+      "end": "book-return",
+      "start_fs": 2200.0,
+      "end_fs": 2600.0
+    }
+  ],
+  "closed": true,
+  "fixed_label_closure_rmsd_A": 2.034697528560607,
+  "symmetry_matches": {
+    "proper": {
+      "rmsd_A": 0.020340800129129533,
+      "atom_map_0based": [
+        3,
+        5,
+        4,
+        15,
+        16,
+        17,
+        9,
+        10,
+        11,
+        6,
+        8,
+        7,
+        0,
+        1,
+        2,
+        12,
+        14,
+        13
+      ],
+      "water_map_0based": [
+        1,
+        5,
+        3,
+        2,
+        0,
+        4
+      ],
+      "water_cycles": "(A B F E)(C D)",
+      "atom_cycles": "(1 4 16 13)(2 6 18 14)(3 5 17 15)(7 10)(8 11 9 12)",
+      "permutation_order": 4,
+      "determinant": 1,
+      "rotation": [
+        [
+          -0.15748316969187948,
+          0.5773580452941107,
+          0.8011596212977553
+        ],
+        [
+          0.31317741315245606,
+          0.7986046237837797,
+          -0.5139557984518749
+        ],
+        [
+          -0.9365462931189972,
+          0.16996570949851036,
+          -0.3065822865720284
+        ]
+      ]
+    },
+    "improper": {
+      "rmsd_A": 0.7516596459708261,
+      "atom_map_0based": [
+        3,
+        5,
+        4,
+        6,
+        7,
+        8,
+        12,
+        13,
+        14,
+        15,
+        17,
+        16,
+        0,
+        1,
+        2,
+        9,
+        11,
+        10
+      ],
+      "water_map_0based": [
+        1,
+        2,
+        4,
+        5,
+        0,
+        3
+      ],
+      "water_cycles": "(A B C E)(D F)",
+      "atom_cycles": "(1 4 7 13)(2 6 9 15 3 5 8 14)(10 16)(11 18)(12 17)",
+      "permutation_order": 8,
+      "determinant": -1,
+      "rotation": [
+        [
+          -0.05876477050744333,
+          0.8334385804211,
+          0.5494786933201927
+        ],
+        [
+          -0.207249460521992,
+          -0.5486227714091134,
+          0.8099757501337471
+        ],
+        [
+          -0.9765215629265694,
+          0.06628112368573501,
+          -0.20496938742750231
+        ]
+      ]
+    }
+  },
+  "interpretation": "A prescribed biased closed loop with a best-fit net atom permutation. Edges are driven trajectory segments, not minimum-energy paths or transition-state connections. This one loop does not determine the effective molecular symmetry group; symmetry-equivalent fits may not be unique."
+}

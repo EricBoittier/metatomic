@@ -1,0 +1,15 @@
+*.pt
+*.dylib
+COLVAR
+bck.*
+driver.log
+environment-explicit.txt
+gradient-checks/
+md-*/
+cv-scan/
+tests/report.xml
+
+cv-tour*/
+tour-trial*/
+cv-minima*/
+minima-preparation*/

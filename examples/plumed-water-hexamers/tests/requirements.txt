@@ -1,0 +1,9 @@
+# Tested Python dependencies; pinned metatomic-core must be installed separately.
+pytest==9.1.1
+jax==0.11.2
+jaxlib==0.11.2
+torch==2.13.0
+numpy==2.5.4
+metatensor-core==0.2.4
+ctypes-dlpack==0.1.1
+plumed==2.10.0
