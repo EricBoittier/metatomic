@@ -1,0 +1,81 @@
+{
+  "metatomic_commit": "b02b9ff3df6458cca21fa8690d229bbda97e6f78",
+  "parameters": {
+    "minima": true,
+    "ramp": 400,
+    "hold": 400,
+    "kappa": 2000.0,
+    "temperature": 200.0,
+    "dt": 0.5,
+    "max_seconds": 400.0
+  },
+  "visits": [
+    {
+      "name": "book",
+      "step": 400,
+      "time_fs": 200.0,
+      "all_atom_rmsd_A": 0.01512139667152818,
+      "oxygen_rmsd_A": 0.009440903659267506,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "bag",
+      "step": 1200,
+      "time_fs": 600.0,
+      "all_atom_rmsd_A": 0.01541354954374735,
+      "oxygen_rmsd_A": 0.012767911954309047,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "cage",
+      "step": 2000,
+      "time_fs": 1000.0,
+      "all_atom_rmsd_A": 0.015225249311968996,
+      "oxygen_rmsd_A": 0.011799175677780872,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "prism",
+      "step": 2800,
+      "time_fs": 1400.0,
+      "all_atom_rmsd_A": 0.015188503074530664,
+      "oxygen_rmsd_A": 0.01633404509310582,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "boat-1",
+      "step": 3600,
+      "time_fs": 1800.0,
+      "all_atom_rmsd_A": 0.015681523485871394,
+      "oxygen_rmsd_A": 0.01414567572794099,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "chair",
+      "step": 4400,
+      "time_fs": 2200.0,
+      "all_atom_rmsd_A": 0.014516475737306052,
+      "oxygen_rmsd_A": 0.012777683497940685,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    },
+    {
+      "name": "book-return",
+      "step": 5200,
+      "time_fs": 2600.0,
+      "all_atom_rmsd_A": 0.018127326709044992,
+      "oxygen_rmsd_A": 0.012692993979858907,
+      "directed_hbond_mismatches": 0,
+      "visited": true
+    }
+  ],
+  "reference_kind": "TIP3P-relaxed minima",
+  "all_visited": true,
+  "elapsed_seconds": 235.51979387500614,
+  "interpretation": "Driven closed loop, not equilibrium sampling or spontaneous transitions. Fixed molecule identities; proper-rotation all-atom RMSD to fixed targets, permutation-invariant O RMSD to the relaxed reference library, directed hydrogen bonds to fixed targets."
+}

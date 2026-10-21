@@ -350,3 +350,81 @@ with matching directed hydrogen-bond graphs. The maximum rigid-bond drift was
 1.6e-12 A. These results and timings are included alongside the documentation
 figures as ``tour-summary.json``, ``tour-verification.json`` and
 ``tour-runtime.json``.
+
+Closed loop through relaxed representatives and permutation symmetry
+-------------------------------------------------------------------
+
+To connect the relaxed structures and return to the starting basin::
+
+    sh run-minima.sh cv-minima-loop
+
+This uses the same pinned core, RMSD plugin, thermostat and timestep. The route
+is book -> bag -> cage -> prism -> boat-1 -> chair -> book-return: 5200 steps,
+2.6 ps, with seven holds and six connecting ramps. No coordinates or atom
+identities are reset during MD. ``run-minima.sh`` includes gradient checks,
+trajectory verification, symmetry analysis and plots in its 480-second budget.
+It uses the checked-in ``minima.xyz`` library.
+
+The library was obtained by removing the bias from each hold-end frame of the
+nine-template tour, retaining all rigid TIP3P bond constraints, and minimizing
+in two stages to projected force thresholds 0.005 and 0.0001 eV/A. Under this
+potential, book/book-2, boat-1/boat-2 and chair/ring converge to equivalent relaxed
+structures. The nine seeds therefore give six distinct representatives. These
+are seed-derived labels; relaxation can change the published geometry. This is
+not an exhaustive inventory of TIP3P minima, and no Hessian or transition-state
+classification is claimed.
+
+``relaxed-seeds.xyz`` retains all nine quenched geometries. ``minima.json`` records
+energies, the originating tour commit and hold times, family assignments and
+matching operations. ``prepare_minima.py`` can regenerate the library from an
+existing nine-template trajectory::
+
+    python prepare_minima.py cv-tour-rmsd minima-preparation
+
+Preparation is separate from the timed connection run. Constraints are explicitly
+installed after reading coordinates: XYZ does not preserve ``FixBondLengths``.
+The analysis tests recompute the stored energies and projected forces, verify
+all duplicate-family assignments, and test known rotations, permutations and
+reflections independently.
+
+``symmetry.py`` enumerates all 720 permutations of the six intact waters and
+all 64 choices of equivalent hydrogen exchange within them. For each of these
+46,080 assignments it computes separate optimal proper and improper fits.
+Two quenched seeds merge only if a **proper** all-atom fit has RMSD below 0.01 A
+and their energies differ by less than 1e-5 eV. Reflected fits are recorded
+separately; they are not silently merged with rotational equivalence.
+
+The geometric matching set is the intact-water permutation group
+``(S2)^6 semidirect S6``, optionally extended by inversion. This is not an
+assignment of the effective molecular symmetry group: which rearrangements are
+physically accessible depends on the potential and barriers. The distinction
+between equivalent minima, permutation-inversion operations and feasible
+rearrangements is discussed in `Wales's review
+<https://arxiv.org/abs/physics/9810032>`_ and in the `water-hexamer tunneling study
+<https://pubs.rsc.org/en/content/articlehtml/2025/cp/d5cp00155b>`_.
+
+The loop tests a specific operation: after returning to book,
+``analyze_loop.py`` aligns the final hold to the first hold while allowing water
+and hydrogen permutations. It reports the best proper and improper RMSDs, the
+fixed-label RMSD, and the net atom and water permutations in cycle notation.
+The map sends final molecule/atom ``i`` to the initial reference site it occupies;
+atom cycles use one-based OHH indices. ``closure-symmetry.png`` shows the two
+actual frames with fixed A–F molecule identities. Those labels also appear in
+the loop animation.
+
+The route and target labeling are deliberately chosen before dynamics. A net
+permutation demonstrates a driven connection between equivalent labeled copies;
+it is not a spontaneously discovered tunneling mechanism. Connections between
+different relaxed representatives are driven trajectory segments, not validated
+minimum-energy paths. One closed loop does not establish a full symmetry group,
+and best-fit operations need not be unique for a symmetric structure.
+
+Observed closed-loop result: the complete checks/MD/analysis/rendering pipeline
+took 285.2 seconds (4 min 45 s), including 235.5 seconds of MD. Every target,
+including book-return, passed all eleven saved-frame checks in the final 50 fs
+of its hold. The first/last book frames differ by 2.035 A with fixed labels,
+but only 0.020 A after the proper fit and the net water permutation
+``(A B F E)(C D)``. The best improper fit is 0.752 A. The full atom permutation
+is recorded in ``connection-analysis.json``; its algebraic order is four.
+This is one measured representative operation for the prescribed loop, not
+a determination of the full effective symmetry group.

@@ -91,6 +91,45 @@ templates passed; hold-end all-atom RMSDs were 0.013–0.017 angstrom.
 The :download:`run parameters and endpoint measurements
 <plumed-core-figures/tour-summary.json>` are also available.
 
+Connecting relaxed structures and testing symmetry
+-------------------------------------------------
+
+The additional ``run-minima.sh`` example closes a driven loop through the
+TIP3P-relaxed representatives, returning to book with fixed atom identities.
+Tight unbiased quenches reduce the nine seeds to six representatives: book/book-2,
+boat-1/boat-2 and chair/ring each merge under proper rotations and identical-water
+and hydrogen permutations. These are results for rigid TIP3P, not universal
+identifications of the published isomers.
+
+.. figure:: plumed-core-figures/minima-loop.gif
+   :alt: Closed MD loop with fixed A–F water identities, RMSD traces, PCA and histogram
+   :width: 100%
+
+   A continuous 2.6 ps driven loop through six relaxed representatives and back
+   to book. Molecule labels remain attached to their original atoms.
+
+.. figure:: plumed-core-figures/closure-symmetry.png
+   :alt: Initial and final book frames aligned to reveal the net water permutation
+   :width: 100%
+
+   Actual first and final holds, aligned by an optimal proper rotation and atom
+   assignment. Matching tests all intact-water permutations and within-water H
+   exchanges, with improper fits reported separately. This exposes a net
+   permutation without changing the trajectory's atom identities.
+
+Download the :download:`connection and symmetry audit
+<plumed-core-figures/connection-analysis.json>` and :download:`loop timings
+<plumed-core-figures/minima-loop-runtime.json>`. The loop realizes a deliberately
+selected rearrangement; it does not determine a full molecular symmetry group,
+a tunneling mechanism or minimum-energy transition pathways. See the example
+README for library preparation, matching conventions and references.
+
+The included loop completed in 285 seconds including checks and plots. All six
+representatives and the return hold passed. The observed net water permutation
+is ``(A B F E)(C D)``: the proper permutation-aligned closure RMSD is
+0.020 angstrom, compared with 2.035 angstrom for fixed labels. No inversion is
+needed; the best improper match is 0.752 angstrom.
+
 How to install the code
 ^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -110,3 +110,46 @@ def test_tour_template_mapping_preserves_geometry_and_rigid_water():
     mirrored = previous.copy()
     mirrored.positions[:, 0] *= -1
     assert full_rmsd(mirrored, previous) > 0.15
+
+
+def test_exact_water_permutation_and_inversion_matching():
+    from symmetry import match
+
+    original = load_conformations()["prism"].copy()
+    original.positions += np.random.default_rng(7).normal(0, 0.15, (18, 3))
+    order = (3 * np.array([2, 0, 5, 1, 4, 3])[:, None] + np.arange(3)).ravel()
+    order[[1, 2]] = order[[2, 1]]
+    moved = original[order]
+    moved.rotate(73, "x")
+    moved.translate([3, -2, 1])
+    fits = match(moved, original)
+    assert fits["proper"]["rmsd_A"] < 1e-10
+    assert fits["improper"]["rmsd_A"] > 0.05
+    np.testing.assert_array_equal(fits["proper"]["atom_map_0based"], order)
+    moved.positions[:, 0] *= -1
+    fits = match(moved, original)
+    assert fits["improper"]["rmsd_A"] < 1e-10
+    assert fits["proper"]["rmsd_A"] > 0.05
+
+
+def test_relaxed_minima_library_and_duplicate_families():
+    from ase.calculators.tip3p import TIP3P
+    from ase.constraints import FixBondLengths, FixCom
+    from scan_cv import PAIRS
+    from symmetry import match
+
+    root = Path(__file__).resolve().parents[1]
+    seeds = load_conformations(root / "relaxed-seeds.xyz")
+    minima = load_conformations(root / "minima.xyz")
+    report = json.loads((root / "minima.json").read_text())
+    assert len(seeds) == 9 and len(minima) == 6
+    assert set(sum(report["families"].values(), [])) == set(seeds)
+    for name, atoms in seeds.items():
+        atoms.set_constraint([FixBondLengths(PAIRS, tolerance=1e-12), FixCom()])
+        atoms.calc = TIP3P(rc=20, width=1)
+        # The archived extended XYZ coordinates were rounded to eight decimals.
+        assert abs(atoms.get_potential_energy() - report["energies_eV"][name]) < 1e-7
+        assert np.linalg.norm(atoms.get_forces(), axis=1).max() < 1.2e-4
+    for representative, members in report["families"].items():
+        for name in members:
+            assert match(seeds[name], minima[representative])["proper"]["rmsd_A"] < 0.01

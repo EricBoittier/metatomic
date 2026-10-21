@@ -18,9 +18,14 @@ def verify(directory):
     summary = json.loads((out / "summary.json").read_text())
     args = summary["parameters"]
     frames = read(out / "trajectory.traj", ":")
-    raw = load_conformations()
+    minima = args.get("minima", False)
+    raw = load_conformations(out / "reference-library.xyz" if minima else None)
+    expected = list(raw) + ["book-return"] if minima else ORDER
+    if minima:
+        raw["book-return"] = raw["book"].copy()
     names = [v["name"] for v in summary["visits"]]
-    assert names == ORDER, "The report must include all nine templates in tour order"
+    assert names == expected, "The report must include every target in tour order"
+    count = len(names)
     refs = [read(out / f"{n}-target.xyz", format="xyz") for n in names]
     q = np.array(
         [[np.sqrt(full_rmsd(a, ref) ** 2 + 1e-16) for ref in refs] for a in frames]
@@ -30,25 +35,25 @@ def verify(directory):
     assert np.isfinite(observables).all()
     assert len(frames) == len(colvar) == len(observables)
     np.testing.assert_allclose(observables[:, 0], colvar[:, 0], atol=1e-10)
-    assert np.max(abs(q - colvar[:, 3:12])) < 1e-6
+    assert np.max(abs(q - colvar[:, 3 : 3 + count])) < 1e-6
     assert (
         np.max(abs(np.array([descriptors(a) for a in frames]) - colvar[:, 1:3])) < 1e-8
     )
     steps = colvar[:, 0] / args["dt"]
     stages = [0, args["hold"]]
-    weights = [np.eye(9)[0], np.eye(9)[0]]
-    for i in range(1, 9):
+    weights = [np.eye(count)[0], np.eye(count)[0]]
+    for i in range(1, count):
         stages.extend(
             [stages[-1] + args["ramp"], stages[-1] + args["ramp"] + args["hold"]]
         )
-        weights.extend([np.eye(9)[i], np.eye(9)[i]])
+        weights.extend([np.eye(count)[i], np.eye(count)[i]])
     assert colvar[0, 0] == 0
     assert colvar[-1, 0] == stages[-1] * args["dt"]
     w = np.array(
-        [np.interp(steps, stages, np.array(weights)[:, i]) for i in range(9)]
+        [np.interp(steps, stages, np.array(weights)[:, i]) for i in range(count)]
     ).T
     bias = 0.5 * args["kappa"] * np.sum(w * q * q, axis=1)
-    assert np.max(abs(bias - colvar[:, 12])) < 1e-3
+    assert np.max(abs(bias - colvar[:, 3 + count])) < 1e-3
     bonds = np.array([[a.get_distance(i, j) for i, j in PAIRS] for a in frames])
     bond_error = float(np.max(abs(bonds - bonds[0])))
     assert bond_error < 1e-8
@@ -87,12 +92,12 @@ def verify(directory):
         all_visited=all(r["passed"] for r in results),
         max_bond_error_A=bond_error,
         max_oxygen_diameter_A=float(max_diameter),
-        max_bias_energy_error_eV=float(np.max(abs(bias - colvar[:, 12]))),
+        max_bias_energy_error_eV=float(np.max(abs(bias - colvar[:, 3 + count]))),
     )
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
     assert report["all_visited"], (
-        "Not all nine templates were visited for three consecutive saved frames"
+        "Not all targets were visited for three consecutive saved frames"
     )
     return report
 

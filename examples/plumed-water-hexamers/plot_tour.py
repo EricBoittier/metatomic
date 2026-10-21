@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from analyze_loop import label_waters
 from analyze_sampling import analyze, histogram_axes, pca_axes, plot_summary
 from matplotlib.animation import FuncAnimation, PillowWriter
 from plot_scan import aligned_frames, draw_atoms
@@ -27,16 +28,24 @@ def main(directory):
     visits = summary["visits"]
     times = sampling["time"]
     chosen = [int(np.argmin(abs(times - v["time_fs"] / 1000))) for v in visits]
+    loop = summary["parameters"].get("minima", False)
+    label = (
+        "Closed loop through relaxed minima" if loop else "Nine-template driven MD tour"
+    )
     fig, axes = plt.subplots(3, 3, figsize=(10, 10), layout="constrained")
     for ax, idx, visit in zip(axes.flat, chosen, visits, strict=False):
         draw_atoms(ax, aligned[idx])
+        if loop:
+            label_waters(ax, aligned[idx])
         ax.set_title(
             f"{visit['name']} · {times[idx]:.2f} ps\n"
             f"All-atom RMSD {visit['all_atom_rmsd_A']:.3f} Å",
             fontsize=11,
         )
+    for unused in list(axes.flat)[len(visits) :]:
+        unused.axis("off")
     fig.suptitle(
-        "Nine-template driven MD tour · actual hold-end frames\n"
+        label + " · actual hold-end frames\n"
         "ASE plot_atoms · dashed lines: geometric hydrogen bonds"
     )
     fig.savefig(out / "ase-storyboard.png", dpi=130)
@@ -65,14 +74,17 @@ def main(directory):
 
     def draw(idx):
         draw_atoms(ax, aligned[idx])
+        if loop:
+            label_waters(ax, aligned[idx])
         t = times[idx]
         marker.set_xdata([t, t])
         pc_marker.set_data([sampling["points"][idx, 0]], [sampling["points"][idx, 1]])
         cv_marker.set_data([sampling["cv"][idx, 0]], [sampling["cv"][idx, 1]])
-        target = min(np.searchsorted([v["time_fs"] / 1000 for v in visits], t), 8)
+        target = min(
+            np.searchsorted([v["time_fs"] / 1000 for v in visits], t), len(visits) - 1
+        )
         title.set_text(
-            f"Driven nine-template MD tour · {t:.2f} ps · "
-            f"steering toward {visits[target]['name']}"
+            f"{label} · {t:.2f} ps · steering toward {visits[target]['name']}"
         )
 
     indices = sorted(

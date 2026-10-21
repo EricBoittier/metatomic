@@ -1,4 +1,4 @@
-"""A continuous, driven tour of nine templates; this is not equilibrium sampling."""
+"""Continuous driven tours of source templates or relaxed representatives."""
 
 import argparse
 import json
@@ -82,6 +82,11 @@ def full_rmsd(atoms, target):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--minima",
+        action="store_true",
+        help="Closed loop over the relaxed minima library",
+    )
     parser.add_argument("--output", type=Path, default=HERE / "cv-tour")
     parser.add_argument("--ramp", type=int, default=400)
     parser.add_argument("--hold", type=int, default=400)
@@ -99,9 +104,14 @@ def main():
     started = time.monotonic()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    raw = load_conformations()
+    raw = load_conformations(HERE / "minima.xyz" if args.minima else None)
+    order = list(raw) + ["book-return"] if args.minima else ORDER
+    if args.minima:
+        (out / "reference-library.xyz").write_text((HERE / "minima.xyz").read_text())
+        raw["book-return"] = raw["book"].copy()
+    count = len(order)
     refs = []
-    for name in ORDER:
+    for name in order:
         ref = rigid_reference(raw[name])
         if refs:
             ref = map_reference(ref, refs[-1])
@@ -112,23 +122,23 @@ def main():
         " SPECIES1=1,4,7,10,13,16"
         " SPECIES2=2,3,5,6,8,9,11,12,14,15,17,18 SPECIES_TO_TYPES=8,1"
     )
-    for i, name in enumerate(ORDER):
+    for i, name in enumerate(order):
         lines.append(
             f"q{i}: METATOMIC MODEL=rmsd-target:{out / (name + '-target.xyz')}"
             " PLUGIN=water-hexamer" + species
         )
     stages = [0, args.hold]
-    weights = [np.eye(9)[0], np.eye(9)[0]]
-    for i in range(1, 9):
+    weights = [np.eye(count)[0], np.eye(count)[0]]
+    for i in range(1, count):
         stages.extend([stages[-1] + args.ramp, stages[-1] + args.ramp + args.hold])
-        weights.extend([np.eye(9)[i], np.eye(9)[i]])
+        weights.extend([np.eye(count)[i], np.eye(count)[i]])
     lines.append(
         "tour: MOVINGRESTRAINT ARG="
-        + ",".join(f"q{i}" for i in range(9))
+        + ",".join(f"q{i}" for i in range(count))
         + " "
         + " ".join(
             f"STEP{i}={step} AT{i}="
-            + ",".join(["0"] * 9)
+            + ",".join(["0"] * count)
             + f" KAPPA{i}="
             + ",".join(str(args.kappa * w) for w in weight)
             for i, (step, weight) in enumerate(zip(stages, weights, strict=False))
@@ -136,7 +146,7 @@ def main():
     )
     lines.append(
         "PRINT ARG=rg,cn,"
-        + ",".join(f"q{i}" for i in range(9))
+        + ",".join(f"q{i}" for i in range(count))
         + f",tour.bias STRIDE=10 FILE={out / 'COLVAR'} FMT=%.12f"
     )
     (out / "plumed.dat").write_text("\n".join(lines) + "\n")
@@ -183,11 +193,11 @@ def main():
                     i = stages[1::2].index(step)
                     mismatch = int(np.abs(hb_graph(atoms) - hb_graph(refs[i])).sum())
                     visit = dict(
-                        name=ORDER[i],
+                        name=order[i],
                         step=step,
                         time_fs=step * args.dt,
                         all_atom_rmsd_A=full_rmsd(atoms, refs[i]),
-                        oxygen_rmsd_A=oxygen_rmsd(atoms, raw[ORDER[i]]),
+                        oxygen_rmsd_A=oxygen_rmsd(atoms, raw[order[i]]),
                         directed_hbond_mismatches=mismatch,
                     )
                     visit["visited"] = (
@@ -216,13 +226,16 @@ def main():
         kernel=str(KERNEL),
         parameters=vars(args) | {"output": str(out)},
         visits=visits,
+        reference_kind="TIP3P-relaxed minima"
+        if args.minima
+        else "rigidified source templates",
         all_visited=all(v["visited"] for v in visits),
         elapsed_seconds=time.monotonic() - started,
         interpretation=(
             "Driven template tour, not equilibrium sampling or spontaneous "
             "transitions. Fixed molecule labels; proper-rotation all-atom RMSD "
-            "to rigidified templates, permutation-invariant O RMSD to original "
-            "sources, directed hydrogen bonds to rigidified templates."
+            "to fixed targets, permutation-invariant O RMSD to the selected "
+            "reference library, directed hydrogen bonds to fixed targets."
         ),
     )
     (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")

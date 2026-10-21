@@ -57,7 +57,8 @@ def project_pca(features, references):
 def analyze(directory):
     out = Path(directory)
     frames = read(out / "trajectory.traj", ":")
-    refs = load_conformations()
+    library = out / "reference-library.xyz"
+    refs = load_conformations(library if library.exists() else None)
     names = list(refs)
     time = np.array([a.info["time_fs"] for a in frames]) / 1000
     cv = np.array([descriptors(a) for a in frames])
@@ -94,7 +95,9 @@ def analyze(directory):
         frames=len(frames),
         time_range_ps=[float(time[0]), float(time[-1])],
         reference_names=names,
-        reference_kind="unrelaxed source geometries",
+        reference_kind="TIP3P-relaxed minima"
+        if library.exists()
+        else "unrelaxed source geometries",
         pca_features=(
             "15 sorted oxygen pair distances in angstrom; "
             "centered, unscaled; trajectory-only fit"
@@ -148,7 +151,7 @@ def pca_axes(ax, result):
     ax.set(
         xlabel=f"PC1 (Å; {v[0]:.1f}% variance)",
         ylabel=f"PC2 (Å; {v[1]:.1f}% variance)",
-        title="Oxygen geometry PCA · × source references",
+        title="Oxygen geometry PCA · × reference geometries",
     )
     ax.margins(0.2)
     return scatter
@@ -182,7 +185,7 @@ def plot_summary(out, result):
     axes[1, 0].set(
         xlabel="Fraction of saved frames",
         xlim=(0, 1),
-        title="Nearest source O geometry within 0.35 Å RMSD",
+        title="Nearest reference O geometry within 0.35 Å RMSD",
     )
     axes[1, 0].invert_yaxis()
     for i, name in enumerate(result["names"]):
@@ -191,7 +194,7 @@ def plot_summary(out, result):
     axes[1, 1].set(
         xlabel="Time (ps)",
         ylabel="Permutation-minimized O RMSD (Å)",
-        title="Distances to all source conformations",
+        title="Distances to all reference conformations",
     )
     axes[1, 1].legend(ncol=3, fontsize=8, frameon=False)
     fig.suptitle(
