@@ -5,7 +5,7 @@ use lru::LruCache;
 use metatensor::TensorMap;
 use metatensor::c_api::{mts_labels_t, mts_tensormap_t};
 
-use crate::{Error, Quantity, System};
+use crate::{Error, Gradients, Quantity, System};
 use crate::c_api::{mta_system_t, mta_status_t};
 use crate::kernels::{check_atomic_types, ReferenceValue};
 use crate::quantity::check_quantity;
@@ -195,9 +195,21 @@ pub fn execute_model(
         }
     }
 
+    // positions gradients are per unit of length, and the model computed them
+    // for systems converted to its own length unit
+    let positions_factor = if requested_outputs.iter().any(|q| q.gradients.contains(&Gradients::Positions)) {
+        positions_gradient_factor(systems, model_length_unit)?
+    } else {
+        1.0
+    };
+    let gradient_factor = |parameter: &str| {
+        if parameter == "positions" { positions_factor } else { 1.0 }
+    };
+
     // determine whether we need to take ownership of the outputs at all:
     // only if check_consistency is true or any unit conversion factor != 1.0
-    let mut needs_ownership = check_consistency;
+    #[allow(clippy::float_cmp)]
+    let mut needs_ownership = check_consistency || positions_factor != 1.0;
     for requested in &requested_outputs {
         #[allow(clippy::float_cmp)]
         if let Some(declared) = capabilities.find_output(requested) {
@@ -235,7 +247,7 @@ pub fn execute_model(
             // find the declared quantity in capabilities
             let tensor = if let Some(declared) = capabilities.find_output(requested) {
                 let factor = unit_conversion_factor(&declared.unit, &requested.unit)?;
-                scale_tensormap(tensor, factor)?
+                scale_tensormap(tensor, factor, gradient_factor)?
             } else {
                 tensor
             };
@@ -248,4 +260,21 @@ pub fn execute_model(
     }
 
     Ok(())
+}
+
+/// Factor converting positions gradients computed by the model (per model
+/// length unit) to the length unit of the `systems`. This is the same factor
+/// used to convert the positions to the model unit.
+fn positions_gradient_factor(systems: &[Arc<System>], model_length_unit: &str) -> Result<f64, Error> {
+    let mut factors = systems.iter().map(|system| unit_conversion_factor(system.length_unit(), model_length_unit));
+    let first = factors.next().transpose()?.unwrap_or(1.0);
+    for factor in factors {
+        #[allow(clippy::float_cmp)]
+        if factor? != first {
+            return Err(Error::InvalidParameter(
+                "can not convert positions gradients for systems using different length units".into()
+            ));
+        }
+    }
+    Ok(first)
 }

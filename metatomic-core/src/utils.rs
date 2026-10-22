@@ -3,14 +3,22 @@ use metatensor::{TensorBlock, TensorMap};
 use crate::kernels;
 use crate::Error;
 
-/// Scale all values and gradients in a `TensorMap` by `factor`.
+/// Scale all values and gradients in a `TensorMap` by `factor`, and each
+/// gradient additionally by `gradient_factor(parameter)`.
 ///
 /// If a block's values or gradients are marked as read-only in DLPack, a copy
 /// is made via `mts_array_t.copy` and the copy is scaled; otherwise the data is
-/// scaled in place. This is a no-op when `factor == 1.0`.
-pub(crate) fn scale_tensormap(tensor: TensorMap, factor: f64) -> Result<TensorMap, Error> {
+/// scaled in place. This is a no-op when all the factors are `1.0`.
+pub(crate) fn scale_tensormap(
+    tensor: TensorMap,
+    factor: f64,
+    gradient_factor: impl Fn(&str) -> f64,
+) -> Result<TensorMap, Error> {
     #[allow(clippy::float_cmp)]
-    if factor == 1.0 {
+    let unchanged = factor == 1.0 && tensor.blocks().iter().all(|block| {
+        block.gradients().all(|(parameter, _)| gradient_factor(parameter) == 1.0)
+    });
+    if unchanged {
         return Ok(tensor);
     }
 
@@ -45,9 +53,9 @@ pub(crate) fn scale_tensormap(tensor: TensorMap, factor: f64) -> Result<TensorMa
             let mut dlpack = block.values_mut().as_dlpack(device, None, dlpack_version)?;
             kernels::scale_inplace(dlpack.as_mut(), factor)?;
 
-            for (_, mut gradient) in block.gradients_mut() {
+            for (parameter, mut gradient) in block.gradients_mut() {
                 let mut dlpack = gradient.values_mut().as_dlpack(device, None, dlpack_version)?;
-                kernels::scale_inplace(dlpack.as_mut(), factor)?;
+                kernels::scale_inplace(dlpack.as_mut(), factor * gradient_factor(parameter))?;
             }
         }
         Ok(tensor)
@@ -79,7 +87,7 @@ pub(crate) fn scale_tensormap(tensor: TensorMap, factor: f64) -> Result<TensorMa
                 let grad_copy = gradient.values().copy(device)?;
                 let mut dlpack = grad_copy.as_dlpack(device, None, dlpack_version)?;
                 assert!(!dlpack.is_read_only(), "copy of the gradients is still read only");
-                kernels::scale_inplace(dlpack.as_mut(), factor)?;
+                kernels::scale_inplace(dlpack.as_mut(), factor * gradient_factor(parameter))?;
 
                 let grad_samples = gradient.samples();
                 let grad_components = gradient.components();
@@ -128,8 +136,10 @@ mod tests {
         let keys = Labels::new(["_"], [[0i32]]);
         let tensor_map = TensorMap::new(keys, vec![block]).unwrap();
 
-        // scale by 2.5
-        let scaled = scale_tensormap(tensor_map, 2.5).unwrap();
+        // scale by 2.5, and the positions gradients by another factor 2
+        let scaled = scale_tensormap(tensor_map, 2.5, |parameter| {
+            if parameter == "positions" { 2.0 } else { 1.0 }
+        }).unwrap();
 
         // check values
         let block = scaled.block_by_id(0);
@@ -143,6 +153,6 @@ mod tests {
         let device = gradient.values().device().unwrap();
         let dlpack = gradient.values().as_dlpack(device, None, dlpk::sys::DLPackVersion::current()).unwrap();
         let grad_values: ndarray::ArrayViewD<f32> = dlpack.as_ref().try_into().unwrap();
-        assert_eq!(grad_values, ndarray::arr1(&[5.0_f32, 10.0, 15.0]).to_shape(vec![1, 3, 1]).unwrap());
+        assert_eq!(grad_values, ndarray::arr1(&[10.0_f32, 20.0, 30.0]).to_shape(vec![1, 3, 1]).unwrap());
     }
 }

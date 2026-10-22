@@ -512,3 +512,61 @@ def test_torch_compile():
             expected.gradient(parameter).values,
             rtol=1e-6,
         )
+
+
+class LinearModel(TorchModel):
+    """E = sum of all the coordinates, for a model working in Bohr and eV"""
+
+    def capabilities(self):
+        return ModelCapabilities(
+            atomic_types=[1, 6, 8],
+            interaction_range=0.0,
+            length_unit="Bohr",
+            supported_devices=["cpu"],
+            dtype="float64",
+            outputs=[Quantity(name="energy", unit="eV", sample_kind="system")],
+        )
+
+    def metadata(self):
+        return ModelMetadata(name="linear model")
+
+    def forward(self, systems, selected_atoms, outputs):
+        block = TensorBlock(
+            values=torch.stack([s.positions.sum() for s in systems]).reshape(-1, 1),
+            samples=Labels.range("system", len(systems)),
+            components=[],
+            properties=Labels.range("energy", 1),
+        )
+        return [TensorMap(Labels.range("_", 1), [block])]
+
+
+def test_gradients_units():
+    # the engine uses Angstrom and meV, the model Bohr and eV
+    positions = np.arange(9, dtype=np.float64).reshape(3, 3)
+    system = System(
+        "angstrom",
+        np.array([1, 6, 8], dtype=np.int32),
+        positions,
+        np.zeros((3, 3)),
+        np.array([False, False, False]),
+    )
+    request = Quantity(
+        name="energy",
+        unit="meV",
+        sample_kind="system",
+        gradients=["positions", "strain"],
+    )
+    (energy,) = execute_model(
+        LinearModel(), [system], [request], check_consistency=True
+    )
+
+    bohr = 1 / 0.52917721054482
+    block = energy.block()
+    np.testing.assert_allclose(block.values, [[1000 * bohr * positions.sum()]])
+    # dE/dr is per Bohr in the model, per Angstrom for the engine
+    np.testing.assert_allclose(block.gradient("positions").values, 1000 * bohr)
+    # strain is dimensionless, only the energy unit changes
+    strain = np.repeat(positions.sum(axis=0)[:, None], 3, axis=1)
+    np.testing.assert_allclose(
+        block.gradient("strain").values.reshape(3, 3), 1000 * bohr * strain
+    )

@@ -184,7 +184,7 @@ impl System {
 
                 let factor = crate::unit_conversion_factor(&data_unit, &requested.unit)?;
 
-                tensor = crate::utils::scale_tensormap(tensor, factor)?;
+                tensor = crate::utils::scale_tensormap(tensor, factor, |_| 1.0)?;
 
                 // update the unit info to the requested unit
                 tensor.set_info("unit", &requested.unit);
