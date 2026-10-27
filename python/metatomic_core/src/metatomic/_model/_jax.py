@@ -374,12 +374,22 @@ def _jax_system(system: System, data: dict, positions, strain) -> JaxSystem:
     )
 
 
-def _to_numpy(array) -> np.ndarray:
+try:
+    from metatensor._data._array import _is_jax_array  # noqa: F401
+
+    METATENSOR_STORES_JAX = True
+except ImportError:
+    METATENSOR_STORES_JAX = False
+
+
+def _mts_values(array):
     """
-    Convert a JAX array to NumPy for metatensor, which only stores NumPy arrays and
-    torch tensors. This is a zero-copy view on CPU and a copy to the host on GPU, until
-    metatensor's Python ``mts_array_t`` supports JAX (or any DLPack array).
+    Values to store in a :py:class:`TensorBlock`: the JAX array itself if metatensor
+    supports JAX arrays, otherwise a NumPy array (a zero-copy view on CPU, and a copy
+    to the host on GPU).
     """
+    if METATENSOR_STORES_JAX:
+        return array
     if array.devices().pop().platform == "cpu":
         return np.from_dlpack(array)
     return np.asarray(array)
@@ -392,7 +402,7 @@ def _to_block(block: JaxBlock, other, values=None) -> TensorBlock:
     they were stored in ``run``.
     """
     new_block = TensorBlock(
-        values=_to_numpy(next(other) if values is None else values),
+        values=_mts_values(next(other) if values is None else values),
         samples=block.samples,
         components=block.components,
         properties=block.properties,
@@ -401,7 +411,7 @@ def _to_block(block: JaxBlock, other, values=None) -> TensorBlock:
         new_block.add_gradient(
             parameter,
             TensorBlock(
-                values=_to_numpy(next(other)),
+                values=_mts_values(next(other)),
                 samples=gradient.samples,
                 components=gradient.components,
                 properties=gradient.properties,
@@ -443,9 +453,7 @@ def _autograd_gradients(block, differentiated, index, gradients, vjp):
 
     # move the components and properties to the end
     def finish(grad):
-        return np.moveaxis(_to_numpy(grad), 0, -1).reshape(
-            *grad.shape[1:], *values_shape
-        )
+        return jnp.moveaxis(grad, 0, -1).reshape(*grad.shape[1:], *values_shape)
 
     sample_systems = np.asarray(block.samples.column("system")).tolist()
     results = []
@@ -464,9 +472,11 @@ def _autograd_gradients(block, differentiated, index, gradients, vjp):
             (
                 "positions",
                 TensorBlock(
-                    values=np.concatenate(grad_values)
-                    if grad_values
-                    else np.zeros((0, 3, *values_shape), dtype=values.dtype),
+                    values=_mts_values(
+                        jnp.concatenate(grad_values)
+                        if grad_values
+                        else jnp.zeros((0, 3, *values_shape), dtype=values.dtype)
+                    ),
                     samples=Labels(
                         ["sample", "system", "atom"],
                         np.concatenate(grad_samples)
@@ -486,9 +496,11 @@ def _autograd_gradients(block, differentiated, index, gradients, vjp):
             (
                 "strain",
                 TensorBlock(
-                    values=np.stack(grad_values)
-                    if grad_values
-                    else np.zeros((0, 3, 3, *values_shape), dtype=values.dtype),
+                    values=_mts_values(
+                        jnp.stack(grad_values)
+                        if grad_values
+                        else jnp.zeros((0, 3, 3, *values_shape), dtype=values.dtype)
+                    ),
                     samples=Labels.range("sample", n_samples),
                     components=[Labels.range("xyz_1", 3), Labels.range("xyz_2", 3)]
                     + block.components,
