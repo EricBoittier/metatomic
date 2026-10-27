@@ -80,6 +80,12 @@ class JaxSystem:
         return [options for options, _ in self._pairs]
 
     def custom_data(self, name: str) -> JaxTensorMap:
+        if name not in self._custom_data:
+            raise ValueError(
+                f"no custom data named '{name}' in this system (known: "
+                f"{list(self._custom_data)}). Request it in requested_inputs(); "
+                "execute_model(check_consistency=True) then checks it is provided"
+            )
         return self._custom_data[name]
 
     def known_custom_data(self) -> list[str]:
