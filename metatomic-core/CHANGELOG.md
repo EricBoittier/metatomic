@@ -17,6 +17,14 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 #### Removed
 -->
 
+### Added
+
+- `JaxModel` (Python): write metatomic models with JAX. `forward()` receives the
+  systems with JAX arrays and returns `JaxTensorMap`; forces, stress and other
+  gradients come from JAX autodiff of the outputs (`AutogradModel` does the same
+  for any array library with autodiff). The outputs are stored as JAX arrays when
+  metatensor-core supports them, and copied to NumPy otherwise.
+
 ### Fixed
 
 - Converting the units of model outputs no longer panics when the outputs are
