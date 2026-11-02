@@ -1125,26 +1125,21 @@ def _get_ase_input(
     if options.sample_kind == "atom":
         if name.startswith("ase::arrays::"):
             array_name = name[len("ase::arrays::") :]
-            if array_name in atoms.arrays:
-                values = atoms.arrays[array_name]
-                infos = {
-                    "unit": "",
-                    "properties_name": "_",
-                }
-            else:
+            if array_name not in atoms.arrays:
                 raise ValueError(
                     f"The model requested '{name}' as input, but no array with name "
                     f"'{array_name}' was found in the ASE Atoms object."
                 )
-
-        if name not in PER_ATOM_QUANTITIES:
+            values = np.asarray(atoms.arrays[array_name], dtype=np.float64)
+            infos = {"unit": "", "properties_name": "_"}
+        elif name in PER_ATOM_QUANTITIES:
+            infos = PER_ATOM_QUANTITIES[name]
+            values = infos["getter"](atoms)
+        else:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
 
-        infos = PER_ATOM_QUANTITIES[name]
-
-        values = infos["getter"](atoms)
         if values.shape[0] != len(atoms):
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
@@ -1161,25 +1156,24 @@ def _get_ase_input(
     elif options.sample_kind == "system":
         if name.startswith("ase::info::"):
             info_name = name[len("ase::info::") :]
-            if info_name in atoms.info:
-                values = np.array([float(atoms.info[info_name])])
-                infos = {
-                    "unit": "",
-                    "properties_name": "_",
-                }
-            else:
+            if info_name not in atoms.info:
                 raise ValueError(
                     f"The model requested '{name}' as input, but no info with name "
                     f"'{info_name}' was found in the ASE Atoms object."
                 )
-
-        if name not in PER_SYSTEM_QUANTITIES:
+            # scalars become shape (1,), 3-vectors (such as a field) shape (1, 3)
+            values = np.asarray(atoms.info[info_name], dtype=np.float64).reshape(1, -1)
+            if values.shape[1] == 1:
+                values = values.reshape(1)
+            infos = {"unit": "", "properties_name": "_"}
+        elif name in PER_SYSTEM_QUANTITIES:
+            infos = PER_SYSTEM_QUANTITIES[name]
+            values = infos["getter"](atoms)
+        else:
             raise ValueError(
                 f"The model requested '{name}', which is not available in `ase`."
             )
-        infos = PER_SYSTEM_QUANTITIES[name]
 
-        values = infos["getter"](atoms)
         if values.shape[0] != 1:
             raise NotImplementedError(
                 f"The model requested the '{name}' input, "
