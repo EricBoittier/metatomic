@@ -30,6 +30,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Models can now request ``ase::arrays::<name>`` and ``ase::info::<name>``
+  inputs. Both prefixes always raised "not available in `ase`" before, and
+  ``ase::info::`` entries can now hold 3-vectors (such as an electric field) as
+  well as scalars.
 - `MetatomicCalculator.compute_energy` now attaches the inputs requested by the
   model (for example per-system ``charge`` and ``spin_multiplicity``), matching
   ``calculate()``. If a requested input cannot be built from the ASE atoms, it

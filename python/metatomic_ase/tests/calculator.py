@@ -941,6 +941,52 @@ def test_additional_input(atoms):
         assert np.allclose(values, expected)
 
 
+def test_ase_arrays_and_info_inputs(atoms):
+    inputs = {
+        "ase::arrays::potential": ModelOutput(sample_kind="atom"),
+        "ase::arrays::dipoles": ModelOutput(sample_kind="atom"),
+        "ase::info::temperature": ModelOutput(sample_kind="system"),
+        "ase::info::electric_field": ModelOutput(sample_kind="system"),
+    }
+    outputs = {("extra::" + n): inputs[n] for n in inputs}
+    capabilities = ModelCapabilities(
+        outputs=outputs,
+        atomic_types=[28],
+        interaction_range=0.0,
+        supported_devices=["cpu"],
+        dtype="float64",
+    )
+    model = AtomisticModel(
+        AdditionalInputModel(inputs).eval(), ModelMetadata(), capabilities
+    )
+
+    potential = np.linspace(-1.0, 1.0, len(atoms))
+    dipoles = np.arange(3 * len(atoms), dtype=np.float64).reshape(-1, 3)
+    atoms.arrays["potential"] = potential
+    atoms.arrays["dipoles"] = dipoles
+    atoms.info["temperature"] = 300.0
+    atoms.info["electric_field"] = [0.0, 0.0, 0.01]
+
+    calculator = MetatomicCalculator(model, check_consistency=True)
+    results = calculator.run_model(atoms, outputs)
+
+    block = results["extra::ase::arrays::potential"].block()
+    assert block.values.shape == (len(atoms), 1)
+    assert np.allclose(block.values.numpy()[:, 0], potential)
+
+    block = results["extra::ase::arrays::dipoles"].block()
+    assert block.components[0].names == ["xyz"]
+    assert np.allclose(block.values.numpy()[:, :, 0], dipoles)
+
+    block = results["extra::ase::info::temperature"].block()
+    assert block.values.shape == (1, 1)
+    assert block.values[0, 0] == 300.0
+
+    block = results["extra::ase::info::electric_field"].block()
+    assert block.components[0].names == ["xyz"]
+    assert np.allclose(block.values.numpy()[0, :, 0], [0.0, 0.0, 0.01])
+
+
 class SpinEnergyModel(torch.nn.Module):
     """Model that requests ``spin_multiplicity`` and returns an energy scaled by it."""
 
