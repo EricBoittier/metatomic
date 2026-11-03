@@ -61,7 +61,18 @@ class MetatomicModel(ModelInterface):
 
     Neighbor lists are computed with vesin, or with nvalchemiops on CUDA when
     available and the model requests full neighbor lists.
+
+    Passing a metatomic-core :py:class:`metatomic.BaseModel` (or ``plugin_name`` /
+    ``model_options`` to load one) returns a :py:class:`CoreModel` instead, which
+    runs the model through :py:func:`metatomic.execute_model`.
     """
+
+    def __new__(cls, model=None, **kwargs):
+        from ._core import CoreModel, _is_core_model
+
+        if cls is MetatomicModel and _is_core_model(model, kwargs):
+            return CoreModel(model, **kwargs)
+        return super().__new__(cls)
 
     def __init__(
         self,

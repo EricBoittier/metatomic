@@ -7,6 +7,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/metatensor/metatomic/)
 
+### Added
+
+- `CoreModel`, running any metatomic-core `metatomic.BaseModel` (NumpyModel,
+  TorchModel, JaxModel, native and TorchScript plugins) in TorchSim through
+  `metatomic.execute_model`, with forces and stress from the explicit `positions`
+  and `strain` gradients. `MetatomicModel` returns a `CoreModel` when given a
+  `BaseModel`, `plugin_name` or `model_options`.
+
 ### Changed
 
 - Update the `vesin` dependency to `>=0.6.0,<0.7`, matching `metatomic-ase`.
