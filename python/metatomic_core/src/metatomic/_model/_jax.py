@@ -12,7 +12,7 @@ from metatensor import Labels, TensorBlock, TensorMap
 from metatensor._status import check_status
 
 from .._quantity import Quantity
-from .._system import PairListOptions, System
+from .._system import PairListOptions, System, _WithoutStream
 from .._utils import unit_conversion_factor
 from ._autograd import AutogradModel
 
@@ -627,7 +627,7 @@ def _mts_array_to_jax(array, like: jax.Array) -> jax.Array:
         DLPackVersion(major=1, minor=0),
     )
     check_status(status)
-    return jax.device_put(jnp.from_dlpack(DLPackArray(tensor)), device)
+    return jax.device_put(jnp.from_dlpack(_WithoutStream(DLPackArray(tensor))), device)
 
 
 def _copy_block(block: TensorBlock, factor=1.0, positions_factor=1.0) -> TensorBlock:

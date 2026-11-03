@@ -643,3 +643,76 @@ def test_static_hint():
     jax_system = JaxSystem.from_system(make_system(POSITIONS, CELL, PAIRS)[0])
     model.evaluate([jax_system], [ENERGY])
     assert model.calls == [2, 3, None]
+
+
+def _gpu():
+    try:
+        return jax.devices("gpu")[0]
+    except RuntimeError:
+        return None
+
+
+@pytest.mark.skipif(_gpu() is None, reason="requires a GPU for JAX")
+def test_gpu():
+    gpu, cpu = _gpu(), jax.devices("cpu")[0]
+    model = PairModel()
+
+    def system_on(device):
+        return jax.device_put(jax_system(POSITIONS, CELL, PAIRS), device)
+
+    (expected,) = model.evaluate([system_on(cpu)], [ENERGY])
+    jitted = jax.jit(lambda systems: model.evaluate(systems, [ENERGY]))
+    for evaluate in [lambda systems: model.evaluate(systems, [ENERGY]), jitted]:
+        (result,) = evaluate([system_on(gpu)])
+        assert result.block().device == gpu
+        for gradient in [None, "positions", "strain"]:
+            actual = (
+                result.block()
+                if gradient is None
+                else result.block().gradient(gradient)
+            )
+            reference = (
+                expected.block()
+                if gradient is None
+                else expected.block().gradient(gradient)
+            )
+            np.testing.assert_allclose(actual.values, reference.values, rtol=1e-6)
+
+    # execute_model with the data of the system on the GPU
+    def gpu_system():
+        system, vectors = make_system(POSITIONS, CELL, PAIRS)
+        on_gpu = System(
+            "angstrom",
+            jax.device_put(jnp.asarray(system.types), gpu),
+            jax.device_put(jnp.asarray(system.positions), gpu),
+            jax.device_put(jnp.asarray(system.cell), gpu),
+            jax.device_put(jnp.asarray(system.pbc), gpu),
+        )
+        pairs = system.pairs(PAIRS_OPTIONS)
+        on_gpu.add_pairs(
+            PAIRS_OPTIONS,
+            TensorBlock(
+                jax.device_put(jnp.asarray(pairs.values), gpu),
+                pairs.samples,
+                pairs.components,
+                pairs.properties,
+            ),
+        )
+        custom = system.custom_data("test::input").block()
+        custom = TensorBlock(
+            jax.device_put(jnp.asarray(custom.values), gpu),
+            custom.samples,
+            custom.components,
+            custom.properties,
+        )
+        on_gpu.add_custom_data("test::input", TensorMap(Labels.range("_", 1), [custom]))
+        return on_gpu
+
+    system, _ = make_system(POSITIONS, CELL, PAIRS)
+    (cpu_result,) = execute_model(model, [system], [ENERGY], check_consistency=True)
+    (gpu_result,) = execute_model(model, [gpu_system()], [ENERGY])
+    np.testing.assert_allclose(
+        gpu_result.block().gradient("positions").values,
+        cpu_result.block().gradient("positions").values,
+        rtol=1e-6,
+    )

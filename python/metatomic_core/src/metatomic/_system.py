@@ -301,6 +301,19 @@ def _guess_arrays_backend(array) -> str:
     return "dlpack"
 
 
+class _WithoutStream:
+    """DLPack producer forwarding to ``array``, ignoring the consumer's ``stream``"""
+
+    def __init__(self, array):
+        self.array = array
+
+    def __dlpack__(self, *, stream=None, **kwargs):
+        return self.array.__dlpack__(**kwargs)
+
+    def __dlpack_device__(self):
+        return self.array.__dlpack_device__()
+
+
 def _array_from_dlpack(tensor, backend):
     """Convert a borrowed DLPack tensor from the C API to the requested backend."""
     if backend is None:
@@ -320,7 +333,9 @@ def _array_from_dlpack(tensor, backend):
     if backend == "jax":
         import jax.numpy as jnp
 
-        return jnp.from_dlpack(wrapped)
+        # JAX asks for a stream on GPU, which the DLPack wrapper does not support; the
+        # data from the C API is ready to use, so there is nothing to synchronize
+        return jnp.from_dlpack(_WithoutStream(wrapped))
 
     raise ValueError(f"Unknown arrays backend: {backend}")
 
