@@ -1,3 +1,6 @@
+import ctypes
+import itertools
+
 import metatensor as mts
 import numpy as np
 import pytest
@@ -16,7 +19,12 @@ from metatomic import (
 jax = pytest.importorskip("jax")
 jnp = jax.numpy
 
-from metatomic import JaxModel, JaxSystem, unit_conversion_factor  # noqa: E402
+from metatomic import (  # noqa: E402
+    JaxModel,
+    JaxPairs,
+    JaxSystem,
+    unit_conversion_factor,
+)
 
 
 PAIRS_OPTIONS = PairListOptions(cutoff=5.0, full_list=False, strict=True)
@@ -559,3 +567,262 @@ def test_evaluate_errors():
         PairModel().evaluate(
             [system], [Quantity(name="test::missing", unit="", sample_kind="system")]
         )
+
+
+# Pair lists given as JaxPairs, computed inside JAX transformations
+
+# `ctypes_dlpack`, which metatomic uses to share arrays, sets these when it is
+# imported; loading vesin sets them to something else for the whole process
+PYCAPSULE_NEW_ARGTYPES = ctypes.pythonapi.PyCapsule_New.argtypes
+
+TRACED_OPTIONS = PairListOptions(cutoff=2.5, full_list=True, strict=True)
+TRACED_CELL = 6.0 * np.eye(3)
+IMAGES = jnp.array(list(itertools.product([-1, 0, 1], repeat=3)), dtype=jnp.int32)
+
+
+def traced_pairs(positions, cell, padded_to, cutoff=TRACED_OPTIONS.cutoff):
+    """Full pair list with the layout of ``vesin_jax.NeighborList``: every atom gets
+    ``padded_to`` entries, its neighbours first and ``(i, -1)`` padding after. Computed
+    by brute force over the neighbouring cells, for positions inside the cell and a
+    cutoff smaller than the cell."""
+    n_atoms = positions.shape[0]
+    grid = np.meshgrid(np.arange(n_atoms), np.arange(len(IMAGES)), indexing="ij")
+    j, s = (jnp.asarray(a.ravel()) for a in grid)
+
+    def neighbors(i, position):
+        vectors = positions[j] - position + IMAGES[s].astype(positions.dtype) @ cell
+        self_pair = (j == i) & jnp.all(IMAGES[s] == 0, axis=1)
+        valid = (jnp.sum(vectors**2, axis=1) < cutoff**2) & ~self_pair
+        # `-1` marks the entries beyond the neighbours of this atom
+        (index,) = jnp.nonzero(valid, size=padded_to, fill_value=-1)
+        keep = index >= 0
+        return (
+            jnp.where(keep, j[index], -1),
+            jnp.where(keep[:, None], IMAGES[s[index]], 0),
+        )
+
+    second, shifts = jax.vmap(neighbors)(jnp.arange(n_atoms), positions)
+    first = jnp.repeat(jnp.arange(n_atoms), padded_to)
+    return JaxPairs(first, second.reshape(-1), shifts.reshape(-1, 3))
+
+
+def static_pairs(pairs):
+    """the pairs in ``JaxPairs``, as the samples of a pair block"""
+    mask = np.asarray(pairs.mask)
+    values = np.column_stack(
+        [
+            np.asarray(pairs.first)[mask],
+            np.asarray(pairs.second)[mask],
+            np.asarray(pairs.shifts)[mask],
+        ]
+    )
+    names = [
+        "first_atom",
+        "second_atom",
+        "cell_shift_a",
+        "cell_shift_b",
+        "cell_shift_c",
+    ]
+    return Labels(names, values.astype(np.int32))
+
+
+def random_positions(seed, n_atoms=10):
+    return np.random.default_rng(seed).uniform(0.0, 6.0, (n_atoms, 3))
+
+
+def traced_system(positions, padded_to=16):
+    positions = jnp.asarray(positions, dtype=jnp.float32)
+    cell = jnp.asarray(TRACED_CELL, dtype=jnp.float32)
+    return JaxSystem(
+        [1] * len(positions),
+        positions,
+        cell,
+        [True, True, True],
+        pairs={TRACED_OPTIONS: traced_pairs(positions, cell, padded_to)},
+    )
+
+
+class TracedPairModel(JaxModel):
+    """E = sum_i (i + 1) * sum_j |r_ij|^2, using the pair indices"""
+
+    def capabilities(self):
+        return ModelCapabilities(
+            atomic_types=[1],
+            interaction_range=TRACED_OPTIONS.cutoff,
+            length_unit="angstrom",
+            supported_devices=["cpu"],
+            dtype="float32",
+            outputs=[Quantity(name="energy", unit="eV", sample_kind="system")],
+        )
+
+    def metadata(self):
+        return ModelMetadata(name="traced pairs")
+
+    def requested_pair_lists(self, requested_outputs):
+        return [TRACED_OPTIONS]
+
+    def forward(self, systems, selected_atoms, outputs):
+        energies = []
+        for system in systems:
+            pairs, vectors = system.pair_arrays(TRACED_OPTIONS)
+            # the padding has zero vectors, so it adds nothing to its segment
+            per_atom = jax.ops.segment_sum(
+                jnp.sum(vectors**2, axis=1), pairs.first, num_segments=len(system)
+            )
+            energies.append(jnp.sum(per_atom * jnp.arange(1, len(system) + 1)))
+
+        block = TensorBlock(
+            values=jnp.stack(energies).reshape(-1, 1),
+            samples=Labels.range("system", len(systems)),
+            components=[],
+            properties=Labels.range("energy", 1),
+        )
+        return [TensorMap(Labels.range("_", 1), [block])]
+
+
+def test_traced_pairs():
+    model = TracedPairModel()
+
+    @jax.jit
+    def evaluate(positions):
+        return model.evaluate([traced_system(positions)], [ENERGY])[0]
+
+    positions = random_positions(0)
+    result = evaluate(positions)
+
+    system = traced_system(positions)
+    pairs, _ = system.pair_arrays(TRACED_OPTIONS)
+    assert 0 < pairs.n_pairs < pairs.capacity
+    static = system.replace(pairs={TRACED_OPTIONS: static_pairs(pairs)})
+    (expected,) = model.evaluate([static], [ENERGY])
+
+    # same energy, forces and stress as with static pairs, including the pair term
+    assert mts.allclose(
+        result.to(array_backend="numpy"),
+        expected.to(array_backend="numpy"),
+        rtol=1e-5,
+        atol=1e-4,
+    )
+    assert np.abs(result.block().gradient("positions").values).max() > 1.0
+
+    message = "use JaxSystem.pair_arrays"
+    with pytest.raises(ValueError, match=message):
+        system.pairs(TRACED_OPTIONS)
+
+
+def test_traced_pairs_given_vectors():
+    system = traced_system(random_positions(1))
+    pairs, vectors = system.pair_arrays(TRACED_OPTIONS)
+    shifted = system.replace(pairs={TRACED_OPTIONS: (pairs, vectors + 0.5)})
+
+    # the values of the given vectors, with the derivatives of the pairs
+    _, given = shifted.pair_arrays(TRACED_OPTIONS)
+    np.testing.assert_allclose(given, jnp.where(pairs.mask[:, None], vectors + 0.5, 0))
+
+    weights = jnp.asarray(np.random.default_rng(2).normal(size=vectors.shape))
+
+    def linear(system, positions):
+        _, vectors = system.replace(positions=positions).pair_arrays(TRACED_OPTIONS)
+        return jnp.sum(weights * vectors)
+
+    np.testing.assert_allclose(
+        jax.grad(linear, argnums=1)(shifted, system.positions),
+        jax.grad(linear, argnums=1)(system, system.positions),
+        rtol=1e-6,
+    )
+
+
+def test_traced_pairs_no_recompilation():
+    model = TracedPairModel()
+    traces = []
+
+    @jax.jit
+    def forces(positions):
+        traces.append(positions)
+        system = traced_system(positions)
+        (result,) = model.evaluate([system], [ENERGY])
+        n_pairs = system.pair_arrays(TRACED_OPTIONS)[0].n_pairs
+        return n_pairs, -result.block().gradient("positions").values
+
+    n_pairs = {int(forces(random_positions(seed))[0]) for seed in range(4)}
+    assert len(n_pairs) > 1
+    assert len(traces) == 1
+
+
+def test_traced_pairs_padding():
+    """the padding of vesin sits between the pairs, not only at the end of the list"""
+    system = traced_system(random_positions(0))
+    pairs, vectors = system.pair_arrays(TRACED_OPTIONS)
+    mask = np.asarray(pairs.mask)
+
+    assert not mask.all()
+    # a list where the padding only came last would pass the test above
+    assert mask[np.argmin(mask) :].any()
+    np.testing.assert_equal(np.asarray(pairs.second)[~mask], -1)
+    np.testing.assert_equal(np.asarray(pairs.shifts)[~mask], 0)
+    np.testing.assert_equal(np.asarray(vectors)[~mask], 0.0)
+
+
+def test_traced_pairs_from_vesin():
+    """the output of vesin_jax goes into JaxPairs as it comes"""
+    vesin_jax = pytest.importorskip("vesin_jax")
+
+    positions = jnp.asarray(random_positions(0), dtype=jnp.float32)
+    cell = jnp.asarray(TRACED_CELL, dtype=jnp.float32)
+    # loading vesin changes the argtypes of `ctypes.pythonapi.PyCapsule_New` for
+    # the whole process, which breaks the DLPack conversions `ctypes_dlpack` does
+    # afterwards; keep that to this test
+    try:
+        calculator = vesin_jax.NeighborList(
+            cutoff=TRACED_OPTIONS.cutoff,
+            full_list=TRACED_OPTIONS.full_list,
+            padded_to=64,
+        )
+        vesin_pairs = JaxPairs(*calculator.compute(positions, cell, True, "ijS"))
+        (reference,) = calculator.compute(positions, cell, True, "D")
+    finally:
+        ctypes.pythonapi.PyCapsule_New.argtypes = PYCAPSULE_NEW_ARGTYPES
+
+    system = JaxSystem(
+        [1] * len(positions),
+        positions,
+        cell,
+        [True, True, True],
+        pairs={TRACED_OPTIONS: vesin_pairs},
+    )
+    pairs, vectors = system.pair_arrays(TRACED_OPTIONS)
+
+    # vesin pads the pairs of every atom, so the padding is spread through the
+    # list instead of sitting at its end
+    mask = np.asarray(pairs.mask)
+    assert mask.any() and not mask.all()
+    assert mask[np.argmin(mask) :].any()
+    np.testing.assert_equal(np.asarray(pairs.second)[~mask], -1)
+
+    # the pair vectors are the ones vesin computes itself, padding included
+    np.testing.assert_allclose(
+        np.asarray(vectors), np.asarray(reference), rtol=1e-5, atol=1e-5
+    )
+
+    # and the same pairs as the samples of a pair block, without the padding
+    assert int(pairs.n_pairs) == len(static_pairs(pairs))
+
+
+def test_traced_pairs_vmap():
+    model = TracedPairModel()
+    systems = [traced_system(random_positions(seed)) for seed in range(3)]
+    # positions, cell and the three arrays of JaxPairs
+    assert len(jax.tree.leaves(systems[0])) == 5
+
+    # systems with different pairs, stacked and evaluated together
+    batch = jax.tree.map(lambda *arrays: jnp.stack(arrays), *systems)
+
+    def evaluate(system):
+        (result,) = model.evaluate([system], [ENERGY])
+        return result.block().values, result.block().gradient("positions").values
+
+    energies, gradients = jax.jit(jax.vmap(evaluate))(batch)
+    for system, energy, gradient in zip(systems, energies, gradients, strict=True):
+        expected_energy, expected_gradient = evaluate(system)
+        np.testing.assert_allclose(energy, expected_energy, rtol=1e-5)
+        np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-5, atol=1e-4)

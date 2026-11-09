@@ -1,6 +1,7 @@
 import abc
 import copy
 import ctypes
+import dataclasses
 from typing import Optional
 
 import jax
@@ -53,20 +54,80 @@ class _StaticLabels:
         return isinstance(other, _StaticLabels) and self.labels == other.labels
 
 
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True)
+class JaxPairs:
+    """
+    A pair list of fixed size, as JAX arrays. Unlike pairs given as :py:class:`Labels`,
+    these arrays can be computed inside :py:func:`jax.jit` (for example by
+    ``vesin_jax.NeighborList``), and the compiled code is re-used when the pairs
+    change. Systems with pair lists of the same size can also be stacked and given to
+    :py:func:`jax.vmap`.
+
+    Entries with a negative second atom are padding, with zero shifts; they keep the
+    arrays the same size whatever the number of pairs, and are spread through the list
+    rather than gathered at its end. This is the layout of ``vesin_jax.NeighborList``,
+    which pads the pairs of every atom to ``padded_to``, so its output can be used
+    directly:
+
+    .. code-block:: python
+
+        calculator = vesin_jax.NeighborList(cutoff=5.0, full_list=True, padded_to=32)
+        pairs = JaxPairs(*calculator.compute(positions, cell, pbc, "ijS"))
+
+    An atom with more neighbors than ``padded_to`` is an error from vesin rather than
+    a truncated list, so these pairs are either all there or no pairs at all.
+
+    :param first: index of the first atom in each pair, with shape ``(size,)``
+    :param second: index of the second atom in each pair, or a negative number for
+        padding, with shape ``(size,)``
+    :param shifts: cell shifts of each pair, with shape ``(size, 3)``
+    """
+
+    first: jax.Array
+    second: jax.Array
+    shifts: jax.Array
+
+    @classmethod
+    def from_labels(cls, samples: Labels) -> "JaxPairs":
+        """Create a pair list without padding from the samples of a pair block"""
+        values = jnp.asarray(np.asarray(samples.values))
+        return cls(values[:, 0], values[:, 1], values[:, 2:5])
+
+    @property
+    def capacity(self) -> int:
+        """Number of entries in this pair list, including the padding"""
+        return self.first.shape[-1]
+
+    @property
+    def mask(self) -> jax.Array:
+        """Which entries are pairs (``True``), and which are padding (``False``)"""
+        return self.second >= 0
+
+    @property
+    def n_pairs(self) -> jax.Array:
+        """Number of pairs in this list, leaving out the padding"""
+        return jnp.sum(self.mask, axis=-1)
+
+
 @jax.tree_util.register_pytree_node_class
 class JaxSystem:
     """
     A system with :py:class:`jax.Array` data, given to :py:meth:`JaxModel.forward`.
 
-    This is a JAX pytree: the positions, cell, pair vectors and custom data are
-    leaves, while the atomic types, periodic boundary conditions, length unit and the
-    samples of the pair lists are static data. Systems can be given to and returned
-    from :py:func:`jax.jit`, :py:func:`jax.grad`, :py:func:`jax.vmap`, ... and in
-    particular to :py:meth:`JaxModel.evaluate`.
+    This is a JAX pytree: the positions, cell, pair vectors, :py:class:`JaxPairs` and
+    custom data are leaves, while the atomic types, periodic boundary conditions,
+    length unit and the samples of pair lists given as :py:class:`Labels` are static
+    data. Systems can be given to and returned from :py:func:`jax.jit`,
+    :py:func:`jax.grad`, :py:func:`jax.vmap`, ... and in particular to
+    :py:meth:`JaxModel.evaluate`.
 
-    The pair vectors are computed from the positions and cell, using the samples of
-    the pair lists. When the vectors are given (for example by a simulation engine),
-    they are used as-is, and the derivatives are still those of
+    Pair lists can be given as :py:class:`Labels` (static data: changing them
+    re-compiles the functions using the system) or as :py:class:`JaxPairs` (arrays of
+    fixed size, which can be computed inside :py:func:`jax.jit`). The pair vectors
+    are computed from the positions and cell, using the pair indices and shifts. When
+    the vectors are given (for example by a simulation engine), their values are used
+    as-is, and the derivatives are still those of
     ``positions[second] - positions[first] + cell_shifts @ cell``.
 
     :param types: atomic types of all atoms
@@ -75,9 +136,10 @@ class JaxSystem:
     :param pbc: periodic boundary conditions in each direction
     :param length_unit: unit of the positions and cell
     :param pairs: pair lists in this system, as a dictionary from the options to the
-        samples of the pairs (``first_atom``, ``second_atom``, ``cell_shift_a``,
-        ``cell_shift_b`` and ``cell_shift_c``), or to a tuple of the samples and the
-        pair vectors, with shape ``(n_pairs, 3, 1)``
+        pairs, either as the samples of a pair block (``first_atom``,
+        ``second_atom``, ``cell_shift_a``, ``cell_shift_b`` and ``cell_shift_c``) or as
+        :py:class:`JaxPairs`; or to a tuple of the pairs and the pair vectors, with
+        shape ``(n_pairs, 3, 1)``
     :param custom_data: custom data in this system, indexed by name. The unit of the
         data can be given with ``TensorMap.set_info("unit", ...)``
     """
@@ -99,13 +161,7 @@ class JaxSystem:
         self.cell = cell
         self.length_unit = length_unit
 
-        self._pairs = {}
-        for options, value in (pairs or {}).items():
-            samples, vectors = value if isinstance(value, tuple) else (value, None)
-            if isinstance(samples, _StaticLabels):
-                samples = samples.labels
-            self._pairs[options] = (samples, vectors)
-
+        self._pairs = _pair_entries(pairs)
         self._custom_data = dict(custom_data or {})
 
     @classmethod
@@ -150,19 +206,24 @@ class JaxSystem:
         )
 
     def tree_flatten(self):
-        options = tuple(self._pairs.keys())
+        entries = self._pairs.values()
         children = (
             self.positions,
             self.cell,
-            tuple(vectors for _, vectors in self._pairs.values()),
+            # pairs given as `JaxPairs` are leaves, the others are static (`None` here)
+            tuple(p if isinstance(p, JaxPairs) else None for p, _ in entries),
+            tuple(vectors for _, vectors in entries),
             tuple(self._custom_data.values()),
         )
         static = (
             self._types,
             self._pbc,
             self.length_unit,
-            options,
-            tuple(_StaticLabels(samples) for samples, _ in self._pairs.values()),
+            tuple(self._pairs.keys()),
+            tuple(
+                None if isinstance(p, JaxPairs) else _StaticLabels(p)
+                for p, _ in entries
+            ),
             tuple(self._custom_data.keys()),
         )
         return children, static
@@ -170,26 +231,31 @@ class JaxSystem:
     @classmethod
     def tree_unflatten(cls, static, children):
         types, pbc, length_unit, options, samples, names = static
-        positions, cell, vectors, custom_data = children
+        positions, cell, traced, vectors, custom_data = children
         system = cls.__new__(cls)
         system._types, system._pbc, system.length_unit = types, pbc, length_unit
         system.positions, system.cell = positions, cell
         system._pairs = {
-            o: (s.labels, v) for o, s, v in zip(options, samples, vectors, strict=True)
+            o: (s.labels if t is None else t, v)
+            for o, s, t, v in zip(options, samples, traced, vectors, strict=True)
         }
         system._custom_data = dict(zip(names, custom_data, strict=True))
         return system
 
-    def replace(self, *, positions=None, cell=None) -> "JaxSystem":
+    def replace(self, *, positions=None, cell=None, pairs=None) -> "JaxSystem":
         """
-        Get a copy of this system with new ``positions`` and/or ``cell``, keeping the
-        same pair lists (the pair vectors are computed from the new positions).
+        Get a copy of this system with new ``positions``, ``cell`` and/or ``pairs``.
+        The pair vectors are computed from the new positions and cell. The ``pairs``
+        replace the pair lists with the same options, with the same format as in the
+        constructor, while the other pair lists are kept.
         """
         system = copy.copy(self)
         if positions is not None:
             system.positions = positions
         if cell is not None:
             system.cell = cell
+        if pairs is not None:
+            system._pairs = {**self._pairs, **_pair_entries(pairs)}
         return system
 
     @property
@@ -204,27 +270,65 @@ class JaxSystem:
         return len(self._types)
 
     def pairs(self, options: PairListOptions) -> TensorBlock:
-        """Get the pair list with the given ``options``, as a :py:class:`TensorBlock`"""
+        """
+        Get the pair list with the given ``options``, as a :py:class:`TensorBlock`.
+
+        This is only possible for pair lists given as :py:class:`Labels`, since the
+        samples of a block can not be computed inside :py:func:`jax.jit`; use
+        :py:meth:`pair_arrays` for pair lists given as :py:class:`JaxPairs`.
+        """
+        samples, _ = self._find_pairs(options)
+        if isinstance(samples, JaxPairs):
+            raise ValueError(
+                f"the pair list with {options} is given as JaxPairs, which can not "
+                "be converted to a TensorBlock: use JaxSystem.pair_arrays() instead"
+            )
+
+        _, vectors = self.pair_arrays(options)
+        return TensorBlock(
+            vectors.reshape(-1, 3, 1),
+            samples,
+            [Labels.range("xyz", 3)],
+            Labels.range("distance", 1),
+        )
+
+    def pair_arrays(self, options: PairListOptions) -> tuple[JaxPairs, jax.Array]:
+        """
+        Get the pair list with the given ``options`` as arrays, for pair lists given
+        either as :py:class:`Labels` or as :py:class:`JaxPairs`.
+
+        The pair vectors have the same shape as the pairs, ``(size, 3)``, and are
+        zero for the padding entries. Anything summed or scattered from these vectors
+        is therefore right without looking at the padding, but the atom indices of a
+        padding entry are the ones vesin gives, with a negative second atom: use
+        :py:attr:`JaxPairs.mask` before indexing any other array with them, since JAX
+        reads a negative index as counting from the end.
+
+        :return: the pairs and the pair vectors
+        """
+        pairs, given = self._find_pairs(options)
+        if not isinstance(pairs, JaxPairs):
+            pairs = JaxPairs.from_labels(pairs)
+
+        mask = pairs.mask
+        # padding has a negative second atom, which would otherwise wrap around
+        first = jnp.where(mask, pairs.first, 0)
+        second = jnp.where(mask, pairs.second, 0)
+        shifts = jnp.asarray(pairs.shifts).astype(self.positions.dtype)
+        vectors = self.positions[second] - self.positions[first] + shifts @ self.cell
+        if given is not None:
+            # the values of the given vectors, with the derivatives of `vectors`
+            given = jax.lax.stop_gradient(given).reshape(vectors.shape)
+            vectors = given + (vectors - jax.lax.stop_gradient(vectors))
+
+        return pairs, jnp.where(mask[:, None], vectors, 0.0)
+
+    def _find_pairs(self, options: PairListOptions):
         found = [pair for known, pair in self._pairs.items() if known == options]
         if not found:
             raise ValueError(f"no pair list with {options} in this system")
-        ((samples, vectors),) = found
-
-        values = np.asarray(samples.values)
-        shifts = jnp.asarray(values[:, 2:5], dtype=self.positions.dtype)
-        r = (
-            self.positions[values[:, 1]]
-            - self.positions[values[:, 0]]
-            + shifts @ self.cell
-        )
-        r = r.reshape(-1, 3, 1)
-        if vectors is not None:
-            # keep the values of the given vectors, with the derivatives of `r`
-            r = vectors + (r - jax.lax.stop_gradient(r))
-
-        return TensorBlock(
-            r, samples, [Labels.range("xyz", 3)], Labels.range("distance", 1)
-        )
+        ((pairs, vectors),) = found
+        return pairs, vectors
 
     def known_pairs(self) -> list[PairListOptions]:
         return list(self._pairs.keys())
@@ -535,6 +639,18 @@ class JaxModel(AutogradModel):
             results.append(TensorMap(output.keys, blocks))
 
         return results
+
+
+def _pair_entries(pairs: Optional[dict]) -> dict:
+    """``{options: (Labels or JaxPairs, vectors or None)}`` from the ``pairs`` given to
+    :py:class:`JaxSystem`"""
+    entries = {}
+    for options, value in (pairs or {}).items():
+        pair_list, vectors = value if isinstance(value, tuple) else (value, None)
+        if isinstance(pair_list, _StaticLabels):
+            pair_list = pair_list.labels
+        entries[options] = (pair_list, vectors)
+    return entries
 
 
 def _is_jax_module(obj) -> bool:
