@@ -28,6 +28,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
   so it can be used inside `jax.jit`, `jax.grad`, `jax.vmap`, ...
 - `JaxSystem` is a JAX pytree, and `JaxSystem.from_system()` creates one from a
   `System`. Pair vectors are computed from the positions and cell.
+- `JaxPairs`, pair lists of fixed capacity as JAX arrays (with the layout of
+  `vesin_jax.NeighborList`), which can be computed inside `jax.jit` without
+  re-compiling when the pairs change, and batched with `jax.vmap`.
+  `JaxSystem.pair_arrays()` gives the pairs and their vectors for pair lists
+  given as `Labels` or as `JaxPairs`, and `JaxSystem.replace()` can update the
+  pair lists.
 
 ### Fixed
 
