@@ -624,7 +624,11 @@ def traced_system(positions, capacity=128):
 
 
 class TracedPairModel(JaxModel):
-    """E = sum_i (i + 1) * sum_j |r_ij|^2, using the pair indices"""
+    """E = sum_i w_i * sum_j |r_ij|^2, using the pair indices, with w_i = i + 1 by
+    default"""
+
+    def __init__(self, weights=None):
+        self.weights = weights
 
     def capabilities(self):
         return ModelCapabilities(
@@ -651,7 +655,10 @@ class TracedPairModel(JaxModel):
             per_atom = jax.ops.segment_sum(
                 jnp.sum(vectors**2, axis=1), pairs.first, num_segments=len(system)
             )
-            energies.append(jnp.sum(per_atom * jnp.arange(1, len(system) + 1)))
+            weights = self.weights
+            if weights is None:
+                weights = jnp.arange(1, len(system) + 1)
+            energies.append(jnp.sum(per_atom * weights))
 
         block = TensorBlock(
             values=jnp.stack(energies).reshape(-1, 1),
@@ -755,3 +762,37 @@ def test_traced_pairs_vmap():
         expected_energy, expected_gradient = evaluate(system)
         np.testing.assert_allclose(energy, expected_energy, rtol=1e-5)
         np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-5, atol=1e-4)
+
+
+def test_traced_pairs_second_derivatives():
+    system = traced_system(random_positions(3))
+    pairs, _ = system.pair_arrays(TRACED_OPTIONS)
+    static = system.replace(pairs={TRACED_OPTIONS: static_pairs(pairs)})
+
+    # a loss on the forces, differentiated with respect to the model parameters (as
+    # when fitting to forces or electric fields) goes through the second derivatives
+    # of the pair vectors
+    rng = np.random.default_rng(4)
+    target = jnp.asarray(rng.normal(size=(len(system), 3)), dtype=jnp.float32)
+
+    def loss(weights, system):
+        (result,) = TracedPairModel(weights).evaluate([system], [ENERGY])
+        forces = -result.block().gradient("positions").values.reshape(-1, 3)
+        return jnp.sum((forces - target) ** 2)
+
+    weights = jnp.linspace(0.5, 1.5, len(system), dtype=jnp.float32)
+    traced = jax.jit(jax.grad(loss))(weights, system)
+    np.testing.assert_allclose(traced, jax.grad(loss)(weights, static), rtol=1e-4)
+    assert np.abs(traced).max() > 1.0
+
+    # the hessian with respect to the positions
+    request = Quantity(name="energy", unit="eV", sample_kind="system")
+
+    def energy(positions, system):
+        system = system.replace(positions=positions)
+        return TracedPairModel().evaluate([system], [request])[0].block().values[0, 0]
+
+    hessian = jax.jit(jax.hessian(energy))(system.positions, system)
+    expected = jax.hessian(energy)(system.positions, static)
+    np.testing.assert_allclose(hessian, expected, rtol=1e-4, atol=1e-4)
+    assert np.abs(hessian).max() > 1.0
