@@ -553,3 +553,93 @@ def test_evaluate_errors():
         PairModel().evaluate(
             [system], [Quantity(name="test::missing", unit="", sample_kind="system")]
         )
+
+
+class CountingModel(PairModel):
+    """PairModel recording each call to forward (i.e. each trace under jit)"""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def forward(self, systems, selected_atoms, outputs):
+        # the static hint seen by forward; under jit, forward only runs when tracing
+        self.calls.append(self.current_static_hint)
+        return super().forward(systems, selected_atoms, outputs)
+
+
+def test_execute_jit():
+    model = CountingModel()
+    eager = CountingModel()
+    eager.jit_execute = False
+
+    for _ in range(3):
+        system, _ = make_system(POSITIONS, CELL, PAIRS)
+        (result,) = execute_model(model, [system], [ENERGY], check_consistency=True)
+        system, _ = make_system(POSITIONS, CELL, PAIRS)
+        (expected,) = execute_model(eager, [system], [ENERGY], check_consistency=True)
+
+        for gradient in [None, "positions", "strain"]:
+            actual = (
+                result.block()
+                if gradient is None
+                else result.block().gradient(gradient)
+            )
+            reference = (
+                expected.block()
+                if gradient is None
+                else expected.block().gradient(gradient)
+            )
+            np.testing.assert_allclose(actual.values, reference.values, rtol=1e-6)
+
+    # traced once and re-used, while the eager model runs forward every time
+    assert model.calls == [None]
+    assert eager.calls == [None] * 3
+
+    # other outputs and other static data (pairs) trace again
+    system, _ = make_system(POSITIONS, CELL, PAIRS)
+    request = Quantity(name="energy", unit="eV", sample_kind="system")
+    execute_model(model, [system], [request])
+    assert len(model.calls) == 2
+
+    system, _ = make_system(POSITIONS, CELL, PAIRS[:3])
+    execute_model(model, [system], [ENERGY])
+    assert len(model.calls) == 3
+
+    # dropping the cache traces again
+    model.clear_jit_cache()
+    system, _ = make_system(POSITIONS, CELL, PAIRS)
+    execute_model(model, [system], [ENERGY])
+    assert len(model.calls) == 4
+
+
+class HintModel(CountingModel):
+    """static_hint is computed from concrete data: the number of pairs within 1.5 A"""
+
+    def static_hint(self, systems):
+        assert not isinstance(systems[0].positions, jax.core.Tracer)
+        vectors = np.asarray(systems[0].pairs(PAIRS_OPTIONS).values).reshape(-1, 3)
+        return int((np.linalg.norm(vectors, axis=1) < 1.5).sum())
+
+
+def test_static_hint():
+    model = HintModel()
+
+    system, _ = make_system(POSITIONS, CELL, PAIRS)
+    execute_model(model, [system], [ENERGY], check_consistency=True)
+    system, _ = make_system(POSITIONS, CELL, PAIRS)
+    execute_model(model, [system], [ENERGY], check_consistency=True)
+    # the hint is visible while tracing, and the same hint re-uses the trace
+    assert model.calls == [2]
+    assert model.current_static_hint is None
+
+    # same static data, but a new hint: traced again
+    positions = np.array(POSITIONS) * 0.5
+    system, _ = make_system(positions, CELL, PAIRS)
+    execute_model(model, [system], [ENERGY], check_consistency=True)
+    assert model.calls == [2, 3]
+
+    # evaluate never computes a hint
+    jax_system = JaxSystem.from_system(make_system(POSITIONS, CELL, PAIRS)[0])
+    model.evaluate([jax_system], [ENERGY])
+    assert model.calls == [2, 3, None]

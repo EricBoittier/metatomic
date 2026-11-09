@@ -1,6 +1,7 @@
 import abc
 import copy
 import ctypes
+import json
 from typing import Optional
 
 import jax
@@ -345,7 +346,71 @@ class JaxModel(AutogradModel):
         instead. It should also not be overridden by subclasses.
         """
         systems = [JaxSystem.from_system(system) for system in systems]
-        return self._execute(systems, selected_atoms, requested_outputs)
+        hint = self.static_hint(systems)
+        self.__dict__["_static_hint"] = hint
+        try:
+            if not self.jit_execute:
+                return self._execute(systems, selected_atoms, requested_outputs)
+            return self._jitted_execute(selected_atoms, requested_outputs, hint)(
+                systems
+            )
+        finally:
+            self.__dict__.pop("_static_hint", None)
+
+    def static_hint(self, systems: list[JaxSystem]):
+        """
+        Compute static (hashable) information from the concrete ``systems``, before
+        :py:meth:`forward` is traced by :py:func:`execute_model`.
+
+        Use this to size array shapes from the data, for example a maximal number
+        of neighbors after a data-dependent selection. The value is part of the key
+        of the compiled function (a new value re-traces :py:meth:`forward`) and is
+        available as :py:attr:`current_static_hint` while :py:meth:`forward` runs.
+        It is ``None`` in :py:meth:`evaluate`, where the systems can be traced, so
+        :py:meth:`forward` must then fall back to shapes known from static data.
+        """
+        return None
+
+    @property
+    def current_static_hint(self):
+        """The value of :py:meth:`static_hint` for the current
+        :py:func:`execute_model` call, or ``None``"""
+        return self.__dict__.get("_static_hint")
+
+    #: Compile :py:meth:`forward` and the autograd gradients with :py:func:`jax.jit`
+    #: when running through :py:func:`execute_model`. The compiled function is cached
+    #: per set of requested outputs and ``selected_atoms``, and re-traced whenever the
+    #: static data of the systems (atomic types, pair lists samples, ...) changes. Set
+    #: this to ``False`` for models whose ``forward`` can not be traced.
+    jit_execute: bool = True
+
+    def clear_jit_cache(self):
+        """
+        Drop the functions compiled for :py:func:`execute_model`. Arrays stored on the
+        model (e.g. parameters) are baked into these functions when they are traced,
+        so call this after changing them.
+        """
+        self.__dict__.pop("_jit_execute_cache", None)
+
+    def _jitted_execute(self, selected_atoms, requested_outputs, hint=None):
+        key = (
+            hint,
+            tuple(json.dumps(q.to_dict(), sort_keys=True) for q in requested_outputs),
+            None
+            if selected_atoms is None
+            else (
+                tuple(selected_atoms.names),
+                np.asarray(selected_atoms.values).tobytes(),
+            ),
+        )
+        cache = self.__dict__.setdefault("_jit_execute_cache", {})
+        if key not in cache:
+            cache[key] = jax.jit(
+                lambda systems: self._execute(
+                    systems, selected_atoms, requested_outputs
+                )
+            )
+        return cache[key]
 
     def evaluate(
         self,
