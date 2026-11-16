@@ -351,7 +351,9 @@ class JaxModel(AutogradModel):
         try:
             if not self.jit_execute:
                 return self._execute(systems, selected_atoms, requested_outputs)
-            return self._jitted_execute(selected_atoms, requested_outputs, hint)(systems)
+            return self._jitted_execute(selected_atoms, requested_outputs, hint)(
+                systems
+            )
         finally:
             self.__dict__.pop("_static_hint", None)
 
@@ -404,7 +406,9 @@ class JaxModel(AutogradModel):
         cache = self.__dict__.setdefault("_jit_execute_cache", {})
         if key not in cache:
             cache[key] = jax.jit(
-                lambda systems: self._execute(systems, selected_atoms, requested_outputs)
+                lambda systems: self._execute(
+                    systems, selected_atoms, requested_outputs
+                )
             )
         return cache[key]
 
