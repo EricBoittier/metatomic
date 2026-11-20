@@ -626,6 +626,20 @@ def static_pairs(pairs):
     return Labels(names, values.astype(np.int32))
 
 
+def fixed_size_pairs(pairs, size):
+    """``pairs`` with the layout of ``vesin_jax.NeighborList(fixed_n_pairs=size)``: the
+    pairs first, then ``(-1, -1)`` padding, and only padding if they do not fit; with
+    the number of pairs as ``n_needed``"""
+    order = jnp.argsort((~pairs.mask).astype(jnp.int32), stable=True)[:size]
+    keep = (jnp.arange(size) < pairs.n_pairs) & (pairs.n_pairs <= size)
+    return JaxPairs(
+        jnp.where(keep, pairs.first[order], -1),
+        jnp.where(keep, pairs.second[order], -1),
+        jnp.where(keep[:, None], pairs.shifts[order], 0),
+        pairs.n_pairs,
+    )
+
+
 def random_positions(seed, n_atoms=10):
     return np.random.default_rng(seed).uniform(0.0, 6.0, (n_atoms, 3))
 
@@ -813,6 +827,107 @@ def test_traced_pairs_from_vesin():
 
     # and the same pairs as the samples of a pair block, without the padding
     assert int(pairs.n_pairs) == len(static_pairs(pairs))
+
+
+def evaluate_traced(system):
+    (result,) = TracedPairModel().evaluate([system], [ENERGY])
+    return result.block().values, result.block().gradient("positions").values
+
+
+def test_traced_pairs_fixed_size():
+    """pairs first and padding after, with a negative first atom as well"""
+    system = traced_system(random_positions(0))
+    padded, _ = system.pair_arrays(TRACED_OPTIONS)
+    pairs = fixed_size_pairs(padded, 64)
+
+    n_pairs = int(padded.n_pairs)
+    assert int(pairs.n_pairs) == int(pairs.n_needed) == n_pairs
+    assert not pairs.overflow
+    np.testing.assert_equal(np.asarray(pairs.first)[n_pairs:], -1)
+
+    fixed = system.replace(pairs={TRACED_OPTIONS: pairs})
+    for value, expected in zip(
+        jax.jit(evaluate_traced)(fixed), evaluate_traced(system), strict=True
+    ):
+        np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-4)
+
+
+def test_traced_pairs_overflow():
+    """pairs which did not fit in the list give NaN, and not results computed without
+    any pair"""
+    systems = [traced_system(random_positions(seed)) for seed in range(2)]
+    n_pairs = [int(system.pair_arrays(TRACED_OPTIONS)[0].n_pairs) for system in systems]
+    assert n_pairs[0] != n_pairs[1]
+    # the pairs of one system fit in the list, not those of the other
+    size = sum(n_pairs) // 2
+    fixed = [
+        system.replace(
+            pairs={
+                TRACED_OPTIONS: fixed_size_pairs(
+                    system.pair_arrays(TRACED_OPTIONS)[0], size
+                )
+            }
+        )
+        for system in systems
+    ]
+    batch = jax.tree.map(lambda *arrays: jnp.stack(arrays), *fixed)
+
+    overflow = jax.vmap(lambda s: s.pair_arrays(TRACED_OPTIONS)[0].overflow)(batch)
+    np.testing.assert_equal(np.asarray(overflow), np.array(n_pairs) > size)
+
+    energies, gradients = jax.jit(jax.vmap(evaluate_traced))(batch)
+    for system, energy, gradient, too_many in zip(
+        systems, energies, gradients, overflow, strict=True
+    ):
+        if too_many:
+            assert np.isnan(energy).all() and np.isnan(gradient).all()
+        else:
+            expected_energy, expected_gradient = evaluate_traced(system)
+            np.testing.assert_allclose(energy, expected_energy, rtol=1e-5)
+            np.testing.assert_allclose(
+                gradient, expected_gradient, rtol=1e-5, atol=1e-4
+            )
+
+    # without `n_needed`, nothing says the list is missing the pairs: it is only
+    # padding, and the energy is zero
+    system = fixed[int(np.argmax(overflow))]
+    pairs, _ = system.pair_arrays(TRACED_OPTIONS)
+    unchecked = JaxPairs(pairs.first, pairs.second, pairs.shifts)
+    assert not unchecked.overflow
+    energy, _ = evaluate_traced(system.replace(pairs={TRACED_OPTIONS: unchecked}))
+    np.testing.assert_equal(np.asarray(energy), [[0.0]])
+
+
+def test_traced_pairs_from_vesin_fixed_size():
+    """vesin_jax with `fixed_n_pairs`, and the `"n"` output for lists too small"""
+    vesin_jax = pytest.importorskip("vesin_jax")
+
+    positions = jnp.asarray(random_positions(0), dtype=jnp.float32)
+    cell = jnp.asarray(TRACED_CELL, dtype=jnp.float32)
+    try:
+        lists = [
+            JaxPairs(
+                *vesin_jax.NeighborList(
+                    cutoff=TRACED_OPTIONS.cutoff,
+                    full_list=TRACED_OPTIONS.full_list,
+                    fixed_n_pairs=size,
+                ).compute(positions, cell, True, "ijSn")
+            )
+            for size in (64, 8)
+        ]
+    finally:
+        ctypes.pythonapi.PyCapsule_New.argtypes = PYCAPSULE_NEW_ARGTYPES
+
+    system = traced_system(positions)
+    large, small = (system.replace(pairs={TRACED_OPTIONS: pairs}) for pairs in lists)
+    assert not lists[0].overflow and lists[1].overflow
+    assert int(lists[1].n_needed) == int(lists[0].n_pairs) > 8
+
+    for value, expected in zip(
+        jax.jit(evaluate_traced)(large), evaluate_traced(system), strict=True
+    ):
+        np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-4)
+    assert all(np.isnan(value).all() for value in evaluate_traced(small))
 
 
 def test_traced_pairs_vmap():

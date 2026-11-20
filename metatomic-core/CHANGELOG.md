@@ -29,9 +29,12 @@ a changelog](https://keepachangelog.com/en/1.1.0/) format. This project follows
 - `JaxSystem` is a JAX pytree, and `JaxSystem.from_system()` creates one from a
   `System`. Pair vectors are computed from the positions and cell.
 - `JaxPairs`, pair lists of fixed size as JAX arrays, padded the way
-  `vesin_jax.NeighborList` pads its own (entries with a negative second atom),
-  which can be computed inside `jax.jit` without re-compiling when the pairs
-  change, and batched with `jax.vmap`.
+  `vesin_jax.NeighborList` pads its own with `padded_to` or `fixed_n_pairs`
+  (entries with a negative second atom), which can be computed inside `jax.jit`
+  without re-compiling when the pairs change, and batched with `jax.vmap`.
+  Given the size the list needs (vesin's `"n"` output), `JaxPairs.overflow` says
+  when the pairs did not fit, and the outputs of `JaxModel.evaluate()` are then
+  NaN.
   `JaxSystem.pair_arrays()` gives the pairs and their vectors for pair lists
   given as `Labels` or as `JaxPairs`, and `JaxSystem.replace()` can update the
   pair lists.

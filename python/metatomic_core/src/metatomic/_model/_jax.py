@@ -65,28 +65,38 @@ class JaxPairs:
     :py:func:`jax.vmap`.
 
     Entries with a negative second atom are padding, with zero shifts; they keep the
-    arrays the same size whatever the number of pairs, and are spread through the list
-    rather than gathered at its end. This is the layout of ``vesin_jax.NeighborList``,
-    which pads the pairs of every atom to ``padded_to``, so its output can be used
-    directly:
+    arrays the same size whatever the number of pairs, and can sit anywhere in the
+    list. This is the layout of ``vesin_jax.NeighborList`` with either ``padded_to``
+    (the pairs of every atom padded to this size, with ``(i, -1)`` entries) or
+    ``fixed_n_pairs`` (all the pairs first, then ``(-1, -1)`` entries), so its output
+    can be used directly:
 
     .. code-block:: python
 
-        calculator = vesin_jax.NeighborList(cutoff=5.0, full_list=True, padded_to=32)
-        pairs = JaxPairs(*calculator.compute(positions, cell, pbc, "ijS"))
+        calculator = vesin_jax.NeighborList(
+            cutoff=5.0, full_list=True, fixed_n_pairs=4096
+        )
+        pairs = JaxPairs(*calculator.compute(positions, cell, pbc, "ijSn"))
 
-    An atom with more neighbors than ``padded_to`` is an error from vesin rather than
-    a truncated list, so these pairs are either all there or no pairs at all.
+    When the pairs do not fit in the list, vesin raises an error, unless ``"n"`` is
+    requested: the list is then only padding, and ``"n"`` gives the size it needs.
+    Given as ``n_needed``, this size sets :py:attr:`overflow`, and all the outputs of
+    :py:meth:`JaxModel.evaluate` (values and gradients) are then NaN, instead of
+    results computed without the pairs. Check :py:attr:`overflow` (or for NaN) after
+    the calculation, and compute the pairs again with a larger list when it is set.
 
     :param first: index of the first atom in each pair, with shape ``(size,)``
     :param second: index of the second atom in each pair, or a negative number for
         padding, with shape ``(size,)``
     :param shifts: cell shifts of each pair, with shape ``(size, 3)``
+    :param n_needed: optional size this pair list needs to hold all the pairs (the
+        ``"n"`` output of vesin), with shape ``()``
     """
 
     first: jax.Array
     second: jax.Array
     shifts: jax.Array
+    n_needed: Optional[jax.Array] = None
 
     @classmethod
     def from_labels(cls, samples: Labels) -> "JaxPairs":
@@ -108,6 +118,14 @@ class JaxPairs:
     def n_pairs(self) -> jax.Array:
         """Number of pairs in this list, leaving out the padding"""
         return jnp.sum(self.mask, axis=-1)
+
+    @property
+    def overflow(self) -> jax.Array:
+        """Whether the pairs did not fit in this list, which then holds none of them
+        (always ``False`` without ``n_needed``)"""
+        if self.n_needed is None:
+            return jnp.zeros(self.first.shape[:-1], dtype=bool)
+        return self.n_needed > self.capacity
 
 
 @jax.tree_util.register_pytree_node_class
@@ -300,9 +318,10 @@ class JaxSystem:
         The pair vectors have the same shape as the pairs, ``(size, 3)``, and are
         zero for the padding entries. Anything summed or scattered from these vectors
         is therefore right without looking at the padding, but the atom indices of a
-        padding entry are the ones vesin gives, with a negative second atom: use
-        :py:attr:`JaxPairs.mask` before indexing any other array with them, since JAX
-        reads a negative index as counting from the end.
+        padding entry are the ones vesin gives, with a negative second atom (and a
+        negative first atom with ``fixed_n_pairs``): use :py:attr:`JaxPairs.mask`
+        before indexing any other array with them, since JAX reads a negative index as
+        counting from the end. :py:func:`jax.ops.segment_sum` drops negative indices.
 
         :return: the pairs and the pair vectors
         """
@@ -481,6 +500,9 @@ class JaxModel(AutogradModel):
             )
             compute = jax.jit(lambda systems: model.evaluate(systems, [energy]))
 
+        When the pairs of a :py:class:`JaxPairs` did not fit in it (see
+        :py:attr:`JaxPairs.overflow`), all the outputs are NaN.
+
         :param systems: systems to run the model on
         :param outputs: outputs the model should compute, with their unit and
             gradients
@@ -559,6 +581,19 @@ class JaxModel(AutogradModel):
                     positions_factor=length_factor if explicit_positions else 1.0,
                 )
             )
+
+        overflow = [
+            pairs.overflow
+            for system in systems
+            for pairs, _ in system._pairs.values()
+            if isinstance(pairs, JaxPairs) and pairs.n_needed is not None
+        ]
+        if overflow:
+            # outputs computed without the pairs which did not fit are NaN, and so are
+            # their derivatives, rather than looking like valid results
+            nan = jnp.where(jnp.any(jnp.stack(overflow)), jnp.nan, 1.0)
+            scaled = [_scale(result, nan) for result in scaled]
+
         return scaled
 
     def _execute(self, systems, selected_atoms, requested_outputs, transform=None):
@@ -681,10 +716,15 @@ def _mts_array_to_jax(array, like: jax.Array) -> jax.Array:
     return jax.device_put(jnp.from_dlpack(DLPackArray(tensor)), device)
 
 
+def _is_one(factor) -> bool:
+    """whether ``factor`` is the number 1 (it can also be a traced array)"""
+    return isinstance(factor, (int, float)) and factor == 1.0
+
+
 def _copy_block(block: TensorBlock, factor=1.0, positions_factor=1.0) -> TensorBlock:
     """a new block with the data of ``block`` (which can be a view), scaled"""
     new = TensorBlock(
-        block.values * factor if factor != 1.0 else block.values,
+        block.values if _is_one(factor) else block.values * factor,
         block.samples,
         block.components,
         block.properties,
@@ -696,7 +736,7 @@ def _copy_block(block: TensorBlock, factor=1.0, positions_factor=1.0) -> TensorB
 
 
 def _scale(tensor: TensorMap, factor: float, positions_factor=1.0) -> TensorMap:
-    if factor == 1.0 and positions_factor == 1.0:
+    if _is_one(factor) and positions_factor == 1.0:
         return tensor
     blocks = [_copy_block(block, factor, positions_factor) for block in tensor.blocks()]
     return TensorMap(tensor.keys, blocks)
