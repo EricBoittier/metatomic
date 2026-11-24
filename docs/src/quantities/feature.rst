@@ -59,8 +59,18 @@ following metadata:
 Gradients of the ``"feature"`` quantity
 ---------------------------------------
 
-The ``"feature"`` quantity is typically used with automatic differentiation for
-the gradients, and explicit gradients are not currently specified.
+Gradients of the ``"feature"`` quantity are not computed with automatic
+differentiation: a model that supports them computes them itself, as explicit
+gradients of the features :math:`f` with respect to ``"positions"``
+(:math:`\partial f / \partial r_j`) and ``"strain"``
+(:math:`\partial f / \partial \epsilon`), defined and requested with
+``explicit_gradients``. These gradients have the same samples and components as
+the :ref:`gradients of the energy <energy-quantity-gradients>`, and the same
+properties as the ``"feature"`` values. The strain :math:`\epsilon` deforms
+positions and cell as :math:`r \to r (1 + \epsilon)`, with positions as row
+vectors. When the model and the engine use different length units, the
+``"positions"`` gradients are converted to the engine's length unit, while the
+``"strain"`` gradients do not depend on it.
 
 
 ``"feature"`` as model output

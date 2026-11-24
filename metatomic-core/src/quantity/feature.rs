@@ -25,7 +25,7 @@ pub(super) fn check(
     checks::it_should_have_valid_samples(&context, request.sample_kind, block, systems, selected_atoms)?;
     checks::it_should_have_expected_components(&context, block, &[])?;
     // no check on properties, as they can be anything for "feature"
-    checks::it_should_have_expected_gradients(&context, request, block, &[])?;
+    checks::it_should_have_expected_gradients(&context, request, block, &["strain", "positions"])?;
 
     Ok(())
 }
@@ -37,7 +37,7 @@ mod tests {
     use dlpk::DLPackTensor;
     use std::sync::Arc;
 
-    use crate::{Quantity, QuantityName, SampleKind, System};
+    use crate::{Gradients, Quantity, QuantityName, SampleKind, System};
 
     use super::check;
 
@@ -256,8 +256,51 @@ mod tests {
         );
     }
 
+    fn with_gradients(block: &mut TensorBlock) {
+        let properties = block.properties();
+        let n_properties = properties.count();
+
+        let positions = TensorBlock::new(
+            ArrayD::<f32>::from_shape_vec(vec![1, 3, n_properties], vec![0.1; 3 * n_properties]).unwrap(),
+            &Labels::new(["sample", "system", "atom"], [[0, 0, 0]]),
+            &[Labels::new(["xyz"], [[0], [1], [2]])],
+            &properties,
+        ).unwrap();
+        block.add_gradient("positions", positions).unwrap();
+
+        let strain = TensorBlock::new(
+            ArrayD::<f32>::from_shape_vec(vec![1, 3, 3, n_properties], vec![0.1; 9 * n_properties]).unwrap(),
+            &Labels::new(["sample"], [[0]]),
+            &[Labels::new(["xyz_1"], [[0], [1], [2]]), Labels::new(["xyz_2"], [[0], [1], [2]])],
+            &properties,
+        ).unwrap();
+        block.add_gradient("strain", strain).unwrap();
+    }
+
     #[test]
     fn gradients() {
+        let mut request = valid_request();
+        request.gradients = vec![Gradients::Positions, Gradients::Strain];
+
+        let mut block = valid_block();
+        with_gradients(&mut block);
+        let feature = TensorMap::new(Labels::new(["_"], [[0]]), vec![block]).unwrap();
+        check(&request, &feature, &[system(3)], None).unwrap();
+
+        request.sample_kind = SampleKind::System;
+        let mut block = TensorBlock::new(
+            ArrayD::<f32>::from_shape_vec(vec![1, 1], vec![1.5]).unwrap(),
+            &Labels::new(["system"], [[0]]),
+            &[],
+            &Labels::new(["feature"], [[0]]),
+        ).unwrap();
+        with_gradients(&mut block);
+        let feature = TensorMap::new(Labels::new(["_"], [[0]]), vec![block]).unwrap();
+        check(&request, &feature, &[system(3)], None).unwrap();
+    }
+
+    #[test]
+    fn gradients_not_requested() {
         let mut block = TensorBlock::new(
             ArrayD::<f32>::from_shape_vec(vec![3, 1], vec![1.0, 2.0, 3.0]).unwrap(),
             &Labels::new(["system", "atom"], [[0, 0], [0, 1], [0, 2]]),
@@ -282,7 +325,7 @@ mod tests {
         let err = check(&valid_request(), &feature, &[system(3)], None).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "invalid parameter: invalid gradients for 'feature': expected no gradients, but found gradients with respect to [positions]"
+            "invalid parameter: invalid gradient 'positions' for 'feature': these gradients were not requested"
         );
     }
 

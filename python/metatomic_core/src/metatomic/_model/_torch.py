@@ -23,8 +23,7 @@ from .._system import PairListOptions, System
 from ._base import BaseModel
 
 
-# Standard quantities for which gradients can be computed with autograd. These are the
-# only standard quantities that can contain gradients.
+# Standard quantities for which gradients can be computed with autograd.
 _AUTOGRAD_STANDARD_QUANTITIES = ("energy", "energy_ensemble", "energy_uncertainty")
 _AUTOGRAD_GRADIENTS = ("positions", "strain")
 
@@ -69,7 +68,7 @@ class TorchModel(BaseModel, torch.nn.Module):
     - uses automatic differentiation to compute the gradients with respect to
       ``"positions"`` and ``"strain"`` of outputs with ``sample_kind="system"``, unless
       the model already declares these gradients in its :py:meth:`capabilities`. This is
-      done for :ref:`standard quantities <standard-quantities>` which support gradients,
+      done for the energy-related :ref:`standard quantities <standard-quantities>`,
       and for any custom quantity with ``sample_kind="system"``. The gradients computed
       with autograd are automatically added to the capabilities of the model. For these
       gradients to be correct, the outputs must be computed from
